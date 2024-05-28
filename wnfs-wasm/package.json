@@ -129,7 +129,7 @@
     "html-webpack-plugin": "^5.5.3",
     "move-file-cli": "^3.0.0",
     "multiformats": "^13.0.0",
-    "style-loader": "^3.3.3",
+    "style-loader": "^4.0.0",
     "text-encoding": "^0.7.0",
     "ts-loader": "^9.4.4",
     "typescript": "^5.1.6",
