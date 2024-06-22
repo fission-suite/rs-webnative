@@ -9,7 +9,6 @@ use async_once_cell::OnceCell;
 use async_recursion::async_recursion;
 use bitvec::array::BitArray;
 use either::{Either, Either::*};
-use libipld::Cid;
 #[cfg(feature = "log")]
 use log::debug;
 use serde::{de::DeserializeOwned, Serialize};
@@ -21,8 +20,10 @@ use std::{
     marker::PhantomData,
 };
 use wnfs_common::{
+    blockstore::Blockstore,
+    ipld_core::cid::Cid,
     utils::{boxed_fut, Arc, BoxFuture, CondSend, CondSync},
-    BlockStore, HashOutput, Link, Storable,
+    HashOutput, Link, Storable,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -86,7 +87,7 @@ where
     ///     assert_eq!(node.get(&String::from("key"), store).await.unwrap(), Some(&42));
     /// }
     /// ```
-    pub async fn set(self: &mut Arc<Self>, key: K, value: V, store: &impl BlockStore) -> Result<()>
+    pub async fn set(self: &mut Arc<Self>, key: K, value: V, store: &impl Blockstore) -> Result<()>
     where
         K: Storable + AsRef<[u8]> + Clone,
         V: Storable + Clone,
@@ -120,7 +121,7 @@ where
     ///     assert_eq!(node.get(&String::from("key"), store).await.unwrap(), Some(&42));
     /// }
     /// ```
-    pub async fn get<'a>(&'a self, key: &K, store: &impl BlockStore) -> Result<Option<&'a V>>
+    pub async fn get<'a>(&'a self, key: &K, store: &impl Blockstore) -> Result<Option<&'a V>>
     where
         K: Storable + AsRef<[u8]>,
         V: Storable,
@@ -165,7 +166,7 @@ where
     pub async fn get_mut<'a>(
         self: &'a mut Arc<Self>,
         key: &K,
-        store: &'a impl BlockStore,
+        store: &'a impl Blockstore,
     ) -> Result<Option<&'a mut V>>
     where
         K: Storable + AsRef<[u8]> + Clone,
@@ -209,7 +210,7 @@ where
     pub async fn remove(
         self: &mut Arc<Self>,
         key: &K,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<Pair<K, V>>>
     where
         K: Storable + AsRef<[u8]> + Clone,
@@ -248,7 +249,7 @@ where
     pub async fn get_by_hash<'a>(
         &'a self,
         hash: &HashOutput,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<&'a V>>
     where
         K: Storable + AsRef<[u8]>,
@@ -292,7 +293,7 @@ where
     pub async fn remove_by_hash(
         self: &mut Arc<Self>,
         hash: &HashOutput,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<Pair<K, V>>>
     where
         K: Storable + AsRef<[u8]> + Clone,
@@ -346,7 +347,7 @@ where
         hashnibbles: &'a mut HashNibbles,
         key: K,
         value: V,
-        store: &'a impl BlockStore,
+        store: &'a impl Blockstore,
     ) -> BoxFuture<'a, Result<()>>
     where
         K: Storable + Clone + AsRef<[u8]> + 'a,
@@ -429,7 +430,7 @@ where
     pub async fn get_value<'a>(
         &'a self,
         hashnibbles: &mut HashNibbles,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<&'a Pair<K, V>>>
     where
         K: Storable + AsRef<[u8]>,
@@ -463,7 +464,7 @@ where
     pub async fn get_value_mut<'a>(
         self: &'a mut Arc<Self>,
         hashnibbles: &mut HashNibbles,
-        store: &'a impl BlockStore,
+        store: &'a impl Blockstore,
     ) -> Result<Option<&'a mut Pair<K, V>>>
     where
         K: Storable + AsRef<[u8]> + Clone,
@@ -498,7 +499,7 @@ where
     pub fn remove_value<'a>(
         self: &'a mut Arc<Self>,
         hashnibbles: &'a mut HashNibbles,
-        store: &'a impl BlockStore,
+        store: &'a impl Blockstore,
     ) -> BoxFuture<'a, Result<Option<Pair<K, V>>>>
     where
         K: Storable + AsRef<[u8]> + Clone + 'a,
@@ -603,7 +604,7 @@ where
     /// ```
     #[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
     #[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-    pub async fn flat_map<F, T>(&self, f: &F, store: &impl BlockStore) -> Result<Vec<T>>
+    pub async fn flat_map<F, T>(&self, f: &F, store: &impl Blockstore) -> Result<Vec<T>>
     where
         F: Fn(&Pair<K, V>) -> Result<T> + CondSync,
         K: Storable + AsRef<[u8]>,
@@ -663,7 +664,7 @@ where
     pub async fn get_node_at<'a>(
         &'a self,
         hashprefix: &HashPrefix,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<Either<&'a Pair<K, V>, &'a Arc<Self>>>>
     where
         K: Storable + AsRef<[u8]>,
@@ -680,7 +681,7 @@ where
         &'a self,
         hashprefix: &HashPrefix,
         index: u8,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<Either<&'a Pair<K, V>, &'a Arc<Self>>>>
     where
         K: Storable + AsRef<[u8]>,
@@ -741,7 +742,7 @@ where
     ///     assert_eq!(map.len(), 100);
     /// }
     /// ```
-    pub async fn to_hashmap<B: BlockStore>(&self, store: &B) -> Result<HashMap<K, V>>
+    pub async fn to_hashmap(&self, store: &impl Blockstore) -> Result<HashMap<K, V>>
     where
         K: Storable + AsRef<[u8]> + Clone + Eq + Hash,
         V: Storable + Clone,
@@ -847,7 +848,7 @@ where
 {
     type Serializable = NodeSerializable<K::Serializable, V::Serializable>;
 
-    async fn to_serializable(&self, store: &impl BlockStore) -> Result<Self::Serializable> {
+    async fn to_serializable(&self, store: &impl Blockstore) -> Result<Self::Serializable> {
         let bitmask = ByteArray::from(self.bitmask.into_inner());
 
         let mut pointers = Vec::with_capacity(self.pointers.len());
@@ -902,7 +903,7 @@ where
 mod tests {
     use super::*;
     use helper::*;
-    use wnfs_common::{utils, MemoryBlockStore};
+    use wnfs_common::{blockstore::InMemoryBlockstore, utils};
 
     mod helper {
         use crate::Hasher;
@@ -933,7 +934,7 @@ mod tests {
 
     #[async_std::test]
     async fn get_value_fetches_deeply_linked_value() {
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
 
         // Insert 4 values to trigger the creation of a linked node.
         let working_node = &mut Arc::new(Node::<String, String, MockHasher>::default());
@@ -956,7 +957,7 @@ mod tests {
 
     #[async_std::test]
     async fn remove_value_canonicalizes_linked_node() {
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
 
         // Insert 4 values to trigger the creation of a linked node.
         let working_node = &mut Arc::new(Node::<String, String, MockHasher>::default());
@@ -995,7 +996,7 @@ mod tests {
 
     #[async_std::test]
     async fn set_value_splits_when_bucket_threshold_reached() {
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
 
         // Insert 3 values into the HAMT.
         let working_node = &mut Arc::new(Node::<String, String, MockHasher>::default());
@@ -1040,7 +1041,7 @@ mod tests {
 
     #[async_std::test]
     async fn get_value_index_gets_correct_index() {
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let hash_expected_idx_samples = [
             (&[0x00], 0),
             (&[0x20], 1),
@@ -1087,7 +1088,7 @@ mod tests {
 
     #[async_std::test]
     async fn node_can_insert_pair_and_retrieve() {
-        let store = MemoryBlockStore::default();
+        let store = InMemoryBlockstore::<64>::new();
         let node = &mut Arc::new(Node::<String, (i32, f64)>::default());
 
         node.set("pill".into(), (10, 0.315), &store).await.unwrap();
@@ -1103,7 +1104,7 @@ mod tests {
         let insert_key: String = "GL59 Tg4phDb  bv".into();
         let remove_key: String = "hK i3b4V4152EPOdA".into();
 
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let node0: &mut Arc<Node<String, u64>> = &mut Arc::new(Node::default());
 
         node0.set(insert_key.clone(), 0, store).await.unwrap();
@@ -1114,7 +1115,7 @@ mod tests {
 
     #[async_std::test]
     async fn node_history_independence_regression() {
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
 
         let node1: &mut Arc<Node<String, u64>> = &mut Arc::new(Node::default());
         let node2: &mut Arc<Node<String, u64>> = &mut Arc::new(Node::default());
@@ -1141,7 +1142,7 @@ mod tests {
 
     #[async_std::test]
     async fn can_map_over_leaf_nodes() {
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
 
         let node = &mut Arc::new(Node::<[u8; 4], String>::default());
         for i in 0..99_u32 {
@@ -1160,7 +1161,7 @@ mod tests {
 
     #[async_std::test]
     async fn can_fetch_node_at_hashprefix() {
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
 
         let node = &mut Arc::new(Node::<String, String, MockHasher>::default());
         for (digest, kv) in HASH_KV_PAIRS.iter() {
@@ -1185,7 +1186,7 @@ mod tests {
 
     #[async_std::test]
     async fn can_generate_hashmap_from_node() {
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
 
         let node = &mut Arc::new(Node::<[u8; 4], String>::default());
         const NUM_VALUES: u32 = 1000;
@@ -1211,7 +1212,7 @@ mod proptests {
     };
     use proptest::prelude::*;
     use test_strategy::proptest;
-    use wnfs_common::MemoryBlockStore;
+    use wnfs_common::blockstore::InMemoryBlockstore;
 
     fn small_key() -> impl Strategy<Value = String> {
         (0..1000).prop_map(|i| format!("key {i}"))
@@ -1227,7 +1228,7 @@ mod proptests {
         #[strategy(0..1000u64)] value: u64,
     ) {
         async_std::task::block_on(async move {
-            let store = &MemoryBlockStore::default();
+            let store = &InMemoryBlockstore::<64>::new();
             let node = &mut node_from_operations(&operations, store).await.unwrap();
 
             node.set(key.clone(), value, store).await.unwrap();
@@ -1250,7 +1251,7 @@ mod proptests {
         #[strategy(small_key())] key: String,
     ) {
         async_std::task::block_on(async move {
-            let store = &MemoryBlockStore::default();
+            let store = &InMemoryBlockstore::<64>::new();
             let node = &mut node_from_operations(&operations, store).await.unwrap();
 
             node.remove(&key, store).await.unwrap();
@@ -1272,7 +1273,7 @@ mod proptests {
         >,
     ) {
         async_std::task::block_on(async move {
-            let store = &MemoryBlockStore::default();
+            let store = &InMemoryBlockstore::<64>::new();
             let node = node_from_operations(&operations, store).await.unwrap();
 
             let node_cid = node.store(store).await.unwrap();
@@ -1293,7 +1294,7 @@ mod proptests {
         async_std::task::block_on(async move {
             let (original, shuffled) = pair;
 
-            let store = &MemoryBlockStore::default();
+            let store = &InMemoryBlockstore::<64>::new();
 
             let node1 = node_from_operations(&original, store).await.unwrap();
             let node2 = node_from_operations(&shuffled, store).await.unwrap();
@@ -1330,7 +1331,7 @@ mod proptests {
         >,
     ) {
         async_std::task::block_on(async move {
-            let store = &MemoryBlockStore::new();
+            let store = &InMemoryBlockstore::<64>::new();
 
             let node = node_from_operations(&operations, store).await.unwrap();
             let map = HashMap::from(&operations);

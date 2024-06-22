@@ -4,29 +4,28 @@
 //! work with high latency.
 
 use anyhow::Result;
-use bytes::Bytes;
 use chrono::Utc;
-use libipld_core::cid::Cid;
 use rand_chacha::ChaCha12Rng;
 use rand_core::SeedableRng;
-use wnfs::{
-    common::{BlockStore, MemoryBlockStore},
-    private::{
-        forest::{hamt::HamtForest, traits::PrivateForest},
-        PrivateDirectory, PrivateNode,
-    },
+use wnfs::private::{
+    forest::{hamt::HamtForest, traits::PrivateForest},
+    PrivateDirectory, PrivateNode,
 };
-use wnfs_common::{utils::CondSend, BlockStoreError, Storable};
+use wnfs_common::{
+    blockstore::{self, Blockstore, InMemoryBlockstore},
+    ipld_core::cid::CidGeneric,
+    Storable,
+};
 
 #[async_std::main]
 async fn main() -> Result<()> {
     // Create a block store that holds all 'hot' data:
-    let hot_store = MemoryBlockStore::default();
+    let hot_store = InMemoryBlockstore::<64>::new();
 
     // Create a block store that holds all 'cold' data.
     // In reality this would probably be something that's accessible
     // with very high latency, but with a lot of bandwidth & storage.
-    let cold_store = MemoryBlockStore::default();
+    let cold_store = InMemoryBlockstore::<64>::new();
 
     // Create a random number generator for randomized encryption.
     let rng = &mut ChaCha12Rng::from_entropy();
@@ -90,41 +89,28 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-struct TieredBlockStore<H: BlockStore, C: BlockStore> {
+struct TieredBlockStore<H: Blockstore, C: Blockstore> {
     hot: H,
     cold: C,
 }
 
-impl<H: BlockStore, C: BlockStore> BlockStore for TieredBlockStore<H, C> {
-    async fn get_block(&self, cid: &Cid) -> Result<Bytes, BlockStoreError> {
-        if self.hot.has_block(cid).await? {
-            self.hot.get_block(cid).await
+impl<H: Blockstore, C: Blockstore> Blockstore for TieredBlockStore<H, C> {
+    async fn get<const S: usize>(
+        &self,
+        cid: &CidGeneric<S>,
+    ) -> Result<Option<Vec<u8>>, blockstore::Error> {
+        if self.hot.has(cid).await? {
+            self.hot.get(cid).await
         } else {
-            self.cold.get_block(cid).await
+            self.cold.get(cid).await
         }
     }
 
-    async fn put_block(
+    async fn put_keyed<const S: usize>(
         &self,
-        bytes: impl Into<Bytes> + CondSend,
-        codec: u64,
-    ) -> Result<Cid, BlockStoreError> {
-        self.hot.put_block(bytes, codec).await
-    }
-
-    async fn put_block_keyed(
-        &self,
-        cid: Cid,
-        bytes: impl Into<Bytes> + CondSend,
-    ) -> Result<(), BlockStoreError> {
-        self.hot.put_block_keyed(cid, bytes).await
-    }
-
-    async fn has_block(&self, cid: &Cid) -> Result<bool, BlockStoreError> {
-        if self.hot.has_block(cid).await? {
-            return Ok(true);
-        }
-
-        self.cold.has_block(cid).await
+        cid: &CidGeneric<S>,
+        data: &[u8],
+    ) -> Result<(), blockstore::Error> {
+        self.hot.put_keyed(cid, data).await
     }
 }

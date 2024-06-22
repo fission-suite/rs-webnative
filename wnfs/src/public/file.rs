@@ -8,13 +8,14 @@ use anyhow::{anyhow, bail, Result};
 use async_once_cell::OnceCell;
 use chrono::{DateTime, Utc};
 use futures::{AsyncRead, AsyncReadExt};
-use libipld_core::cid::Cid;
 use std::{cmp::Ordering, collections::BTreeSet, io::SeekFrom};
 use tokio::io::AsyncSeekExt;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 use wnfs_common::{
+    blockstore::Blockstore,
+    ipld_core::cid::Cid,
     utils::{Arc, CondSend},
-    BlockStore, Link, Metadata, NodeType, Storable,
+    Link, Metadata, NodeType, Storable,
 };
 use wnfs_unixfs_file::{builder::FileBuilder, unixfs::UnixFsFile};
 
@@ -79,7 +80,7 @@ impl PublicFile {
     ///
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let content = b"Hello, World!".to_vec();
     ///     let file = PublicFile::with_content(Utc::now(), content, store).await?;
     ///
@@ -91,7 +92,7 @@ impl PublicFile {
     pub async fn with_content(
         time: DateTime<Utc>,
         content: Vec<u8>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Self> {
         let content_cid = FileBuilder::new()
             .content_bytes(content)
@@ -111,7 +112,7 @@ impl PublicFile {
     pub async fn with_content_rc(
         time: DateTime<Utc>,
         content: Vec<u8>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Arc<Self>> {
         Ok(Arc::new(Self::with_content(time, content, store).await?))
     }
@@ -135,7 +136,7 @@ impl PublicFile {
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
     ///     let disk_file = File::open("./test/fixtures/Clara Schumann, Scherzo no. 2, Op. 14.mp3").await?;
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let file = PublicFile::with_content_streaming(
     ///         Utc::now(),
     ///         disk_file,
@@ -151,7 +152,7 @@ impl PublicFile {
     pub async fn with_content_streaming<'a>(
         time: DateTime<Utc>,
         content: impl AsyncRead + CondSend + 'a,
-        store: &'a impl BlockStore,
+        store: &'a impl Blockstore,
     ) -> Result<Self> {
         let content_cid = FileBuilder::new()
             .content_reader(FuturesAsyncReadCompatExt::compat(content))
@@ -172,7 +173,7 @@ impl PublicFile {
     pub async fn with_content_streaming_rc<'a>(
         time: DateTime<Utc>,
         content: impl AsyncRead + CondSend + 'a,
-        store: &'a impl BlockStore,
+        store: &'a impl Blockstore,
     ) -> Result<Arc<Self>> {
         Ok(Arc::new(
             Self::with_content_streaming(time, content, store).await?,
@@ -194,7 +195,7 @@ impl PublicFile {
     ///
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///
     ///     let file = PublicFile::with_content(
     ///         Utc::now(),
@@ -235,7 +236,7 @@ impl PublicFile {
     ///
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let content = b"Hello, World!\n".repeat(1000).to_vec();
     ///     let file = PublicFile::with_content(Utc::now(), content, store).await?;
     ///
@@ -251,7 +252,7 @@ impl PublicFile {
     pub async fn stream_content<'a>(
         &'a self,
         byte_offset: u64,
-        store: &'a impl BlockStore,
+        store: &'a impl Blockstore,
     ) -> Result<impl AsyncRead + CondSend + 'a> {
         let mut reader = self
             .userland
@@ -281,7 +282,7 @@ impl PublicFile {
     ///
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let content = b"Hello, World!\n".repeat(1000).to_vec();
     ///     let file = PublicFile::with_content(Utc::now(), content, store).await?;
     ///
@@ -296,7 +297,7 @@ impl PublicFile {
         &'a self,
         byte_offset: u64,
         len_limit: Option<usize>,
-        store: &'a impl BlockStore,
+        store: &'a impl Blockstore,
     ) -> Result<Vec<u8>> {
         let size = self.size(store).await?;
         let mut reader = self.stream_content(byte_offset, store).await?;
@@ -328,7 +329,7 @@ impl PublicFile {
     ///
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let rng = &mut ChaCha12Rng::from_entropy();
     ///     let content = get_random_bytes::<324_568>(rng).to_vec();
     ///     let file = PublicFile::with_content(
@@ -345,7 +346,7 @@ impl PublicFile {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn size(&self, store: &impl BlockStore) -> Result<u64> {
+    pub async fn size(&self, store: &impl Blockstore) -> Result<u64> {
         self.userland
             .resolve_value(store)
             .await?
@@ -369,7 +370,7 @@ impl PublicFile {
     ///
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let rng = &mut ChaCha12Rng::from_entropy();
     ///     let content = get_random_bytes::<100>(rng).to_vec();
     ///     let file = PublicFile::with_content(
@@ -386,7 +387,7 @@ impl PublicFile {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn get_content(&self, store: &impl BlockStore) -> Result<Vec<u8>> {
+    pub async fn get_content(&self, store: &impl Blockstore) -> Result<Vec<u8>> {
         self.read_at(0, None, store).await
     }
 
@@ -412,7 +413,7 @@ impl PublicFile {
     /// without causing further conflicts.
     pub(crate) async fn prepare_next_merge<'a>(
         self: &'a mut Arc<Self>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<&'a mut Self> {
         if self.previous.len() > 1 {
             // This is a merge node
@@ -438,7 +439,7 @@ impl PublicFile {
         &mut self,
         content: Vec<u8>,
         time: DateTime<Utc>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<()> {
         let content_cid = FileBuilder::new()
             .content_bytes(content)
@@ -453,7 +454,7 @@ impl PublicFile {
     }
 
     /// Gets the content cid of the file.
-    pub async fn get_raw_content_cid(&self, store: &impl BlockStore) -> Cid {
+    pub async fn get_raw_content_cid(&self, store: &impl Blockstore) -> Cid {
         let content_cid: Result<Cid> = self.userland.resolve_cid(store).await;
         content_cid.unwrap()
     }
@@ -504,7 +505,7 @@ impl PublicFile {
     pub async fn merge(
         self: &mut Arc<Self>,
         other: &Arc<Self>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<bool> {
         let our_cid = self.store(store).await?;
         let other_cid = other.store(store).await?;
@@ -570,7 +571,7 @@ impl std::fmt::Debug for PublicFile {
 impl Storable for PublicFile {
     type Serializable = PublicNodeSerializable;
 
-    async fn to_serializable(&self, store: &impl BlockStore) -> Result<Self::Serializable> {
+    async fn to_serializable(&self, store: &impl Blockstore) -> Result<Self::Serializable> {
         Ok(PublicNodeSerializable::File(PublicFileSerializable {
             version: WNFS_VERSION,
             metadata: self.metadata.clone(),
@@ -641,12 +642,12 @@ impl Clone for PublicFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wnfs_common::MemoryBlockStore;
+    use wnfs_common::blockstore::InMemoryBlockstore;
 
     #[async_std::test]
     async fn previous_links_get_set() {
         let time = Utc::now();
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
 
         let file = &mut PublicFile::new_rc(time);
         let previous_cid = &file.store(store).await.unwrap();
@@ -661,7 +662,7 @@ mod tests {
     #[async_std::test]
     async fn prepare_next_revision_shortcuts_if_possible() {
         let time = Utc::now();
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
 
         let file = &mut PublicFile::new_rc(time);
         let previous_cid = &file.store(store).await.unwrap();

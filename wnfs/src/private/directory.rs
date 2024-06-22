@@ -7,7 +7,6 @@ use crate::{error::FsError, is_readable_wnfs_version, traits::Id, SearchResult, 
 use anyhow::{bail, ensure, Result};
 use async_once_cell::OnceCell;
 use chrono::{DateTime, Utc};
-use libipld_core::cid::Cid;
 use rand_core::CryptoRngCore;
 use std::{
     cmp::Ordering,
@@ -15,8 +14,10 @@ use std::{
     fmt::Debug,
 };
 use wnfs_common::{
+    blockstore::{block::Block as _, Blockstore},
+    ipld_core::cid::Cid,
     utils::{error, Arc, CondSend},
-    BlockStore, Metadata, PathNodes, PathNodesResult, CODEC_RAW,
+    Blake3Block, Metadata, PathNodes, PathNodesResult, CODEC_RAW,
 };
 use wnfs_nameaccumulator::{Name, NameSegment};
 
@@ -130,7 +131,7 @@ impl PrivateDirectory {
         parent_name: &Name,
         time: DateTime<Utc>,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<Arc<Self>> {
         let dir = Arc::new(Self::new(parent_name, time, rng));
@@ -146,7 +147,7 @@ impl PrivateDirectory {
         path_segments: &[String],
         search_latest: bool,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<PrivatePathNodesResult> {
         use PathNodesResult::*;
         let mut working_node = self;
@@ -231,7 +232,7 @@ impl PrivateDirectory {
     ///
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let rng = &mut ChaCha12Rng::from_entropy();
     ///     let forest = &mut HamtForest::new_rsa_2048_rc(rng);
     ///     let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
@@ -252,7 +253,7 @@ impl PrivateDirectory {
         path_segment: &str,
         search_latest: bool,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<PrivateNode>> {
         Ok(match self.content.entries.get(path_segment) {
             Some(private_link) => {
@@ -275,7 +276,7 @@ impl PrivateDirectory {
         path_segment: &str,
         search_latest: bool,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<&'a mut PrivateNode>> {
         Ok(match self.content.entries.get_mut(path_segment) {
             Some(private_link) => {
@@ -297,7 +298,7 @@ impl PrivateDirectory {
         path_segments: &[String],
         search_latest: bool,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<SearchResult<Arc<Self>>> {
         let mut working_dir = Arc::clone(self);
 
@@ -326,7 +327,7 @@ impl PrivateDirectory {
         path_segments: &[String],
         search_latest: bool,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<SearchResult<&'a mut Self>> {
         if search_latest {
             *self = self.clone().search_latest_reconciled(forest, store).await?;
@@ -366,7 +367,7 @@ impl PrivateDirectory {
         time: DateTime<Utc>,
         search_latest: bool,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<&'a mut Self> {
         match self
@@ -504,7 +505,7 @@ impl PrivateDirectory {
     ///
     /// #[async_std::main]
     /// async fn main() {
-    ///     let store = &MemoryBlockStore::default();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let rng = &mut ChaCha12Rng::from_entropy();
     ///     let forest = &mut HamtForest::new_rsa_2048_rc(rng);
     ///     let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
@@ -527,7 +528,7 @@ impl PrivateDirectory {
         path_segments: &[String],
         search_latest: bool,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<PrivateNode>> {
         let Some((tail, path)) = path_segments.split_last() else {
             return Ok(None);
@@ -559,7 +560,7 @@ impl PrivateDirectory {
     ///
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let rng = &mut ChaCha12Rng::from_entropy();
     ///     let forest = &mut HamtForest::new_rsa_2048_rc(rng);
     ///     let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
@@ -592,7 +593,7 @@ impl PrivateDirectory {
         path_segments: &[String],
         search_latest: bool,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Vec<u8>> {
         let (path, filename) = crate::utils::split_last(path_segments)?;
         match self
@@ -631,7 +632,7 @@ impl PrivateDirectory {
     /// };
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
-    ///    let store = &MemoryBlockStore::new();
+    ///    let store = &InMemoryBlockstore::<64>::new();
     ///    let rng = &mut ChaCha12Rng::from_entropy();
     ///    let forest = &mut HamtForest::new_rsa_2048_rc(rng);
     ///    let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
@@ -676,7 +677,7 @@ impl PrivateDirectory {
         search_latest: bool,
         time: DateTime<Utc>,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<&'a mut PrivateFile> {
         let (path, filename) = crate::utils::split_last(path_segments)?;
@@ -716,7 +717,7 @@ impl PrivateDirectory {
     ///
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let rng = &mut ChaCha12Rng::from_entropy();
     ///     let forest = &mut HamtForest::new_rsa_2048_rc(rng);
     ///     let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
@@ -752,7 +753,7 @@ impl PrivateDirectory {
         time: DateTime<Utc>,
         content: Vec<u8>,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<()> {
         let (path, filename) = crate::utils::split_last(path_segments)?;
@@ -805,7 +806,7 @@ impl PrivateDirectory {
     ///
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let rng = &mut ChaCha12Rng::from_entropy();
     ///     let forest = &mut HamtForest::new_rsa_2048_rc(rng);
     ///     let mut init_dir = PrivateDirectory::new_and_store(
@@ -837,7 +838,7 @@ impl PrivateDirectory {
     pub async fn search_latest(
         self: Arc<Self>,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Arc<Self>> {
         PrivateNode::Dir(self)
             .search_latest(forest, store)
@@ -852,7 +853,7 @@ impl PrivateDirectory {
     pub async fn search_latest_reconciled(
         self: Arc<Self>,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Arc<Self>> {
         PrivateNode::Dir(self)
             .search_latest_reconciled(forest, store)
@@ -880,7 +881,7 @@ impl PrivateDirectory {
     ///
     /// #[async_std::main]
     /// async fn main() {
-    ///     let store = &MemoryBlockStore::default();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let rng = &mut ChaCha12Rng::from_entropy();
     ///     let forest = &mut HamtForest::new_rsa_2048_rc(rng);
     ///     let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
@@ -903,7 +904,7 @@ impl PrivateDirectory {
         search_latest: bool,
         time: DateTime<Utc>,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<()> {
         let _ = self
@@ -929,7 +930,7 @@ impl PrivateDirectory {
     ///
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let rng = &mut ChaCha12Rng::from_entropy();
     ///     let forest = &mut HamtForest::new_rsa_2048_rc(rng);
     ///     let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
@@ -966,7 +967,7 @@ impl PrivateDirectory {
         path_segments: &[String],
         search_latest: bool,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Vec<(String, Metadata)>> {
         match self
             .get_leaf_dir(path_segments, search_latest, forest, store)
@@ -1020,7 +1021,7 @@ impl PrivateDirectory {
     ///
     /// #[async_std::main]
     /// async fn main() {
-    ///     let store = &MemoryBlockStore::default();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let rng = &mut ChaCha12Rng::from_entropy();
     ///     let forest = &mut HamtForest::new_rsa_2048_rc(rng);
     ///     let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
@@ -1063,7 +1064,7 @@ impl PrivateDirectory {
         path_segments: &[String],
         search_latest: bool,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<PrivateNode> {
         let (path, node_name) = crate::utils::split_last(path_segments)?;
         let SearchResult::Found(dir) = self
@@ -1095,7 +1096,7 @@ impl PrivateDirectory {
         search_latest: bool,
         time: DateTime<Utc>,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<()> {
         let (path, node_name) = crate::utils::split_last(path_segments)?;
@@ -1141,7 +1142,7 @@ impl PrivateDirectory {
     ///
     /// #[async_std::main]
     /// async fn main() {
-    ///     let store = &MemoryBlockStore::default();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let rng = &mut ChaCha12Rng::from_entropy();
     ///     let forest = &mut HamtForest::new_rsa_2048_rc(rng);
     ///     let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
@@ -1188,7 +1189,7 @@ impl PrivateDirectory {
         search_latest: bool,
         time: DateTime<Utc>,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<()> {
         let removed_node = self
@@ -1227,7 +1228,7 @@ impl PrivateDirectory {
     ///
     /// #[async_std::main]
     /// async fn main() {
-    ///     let store = &MemoryBlockStore::default();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let rng = &mut ChaCha12Rng::from_entropy();
     ///     let forest = &mut HamtForest::new_rsa_2048_rc(rng);
     ///     let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
@@ -1274,7 +1275,7 @@ impl PrivateDirectory {
         search_latest: bool,
         time: DateTime<Utc>,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<()> {
         let result = self
@@ -1297,7 +1298,7 @@ impl PrivateDirectory {
     pub(crate) async fn store(
         &self,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<PrivateRef> {
         let header_cid = self.header.store(store, forest).await?;
@@ -1329,7 +1330,7 @@ impl PrivateDirectory {
         temporal_key: &TemporalKey,
         cid: Cid,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         parent_name: Option<Name>,
     ) -> Result<Self> {
         if !is_readable_wnfs_version(&serializable.version) {
@@ -1383,7 +1384,7 @@ impl PrivateDirectory {
         other: &Arc<Self>,
         other_cid: Cid,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<()> {
         if our_cid == other_cid {
             return Ok(());
@@ -1496,7 +1497,7 @@ impl PrivateDirectoryContent {
         temporal_key: &TemporalKey,
         header_cid: Cid,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<Vec<u8>> {
         let mut entries = BTreeMap::new();
@@ -1536,7 +1537,7 @@ impl PrivateDirectoryContent {
         header_cid: Cid,
         temporal_key: &TemporalKey,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<Cid> {
         Ok(*self
@@ -1554,7 +1555,10 @@ impl PrivateDirectoryContent {
                 let block = snapshot_key.encrypt(&bytes, rng)?;
 
                 // Store content section in blockstore and get Cid.
-                Ok(store.put_block(block, CODEC_RAW).await?)
+                let block = Blake3Block::new(CODEC_RAW, block);
+                let cid = block.cid()?;
+                store.put(block).await?;
+                Ok(cid)
             })
             .await?)
     }
@@ -1602,12 +1606,12 @@ mod tests {
     use rand_core::SeedableRng;
     use test_log::test;
     use testresult::TestResult;
-    use wnfs_common::MemoryBlockStore;
+    use wnfs_common::blockstore::InMemoryBlockstore;
 
     #[test(async_std::test)]
     async fn look_up_can_fetch_file_added_to_directory() {
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
 
@@ -1637,7 +1641,7 @@ mod tests {
     #[test(async_std::test)]
     async fn look_up_cannot_fetch_file_not_added_to_directory() {
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &HamtForest::new_rsa_2048_rc(rng);
         let root_dir = PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
 
@@ -1652,7 +1656,7 @@ mod tests {
     #[test(async_std::test)]
     async fn get_node_can_fetch_node_from_root_dir() {
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
 
@@ -1729,7 +1733,7 @@ mod tests {
     #[test(async_std::test)]
     async fn mkdir_can_create_new_directory() {
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
 
@@ -1756,7 +1760,7 @@ mod tests {
     #[test(async_std::test)]
     async fn ls_can_list_children_under_directory() {
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
 
@@ -1810,7 +1814,7 @@ mod tests {
     #[test(async_std::test)]
     async fn rm_can_remove_children_from_directory() {
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
 
@@ -1866,7 +1870,7 @@ mod tests {
     #[async_std::test]
     async fn read_can_fetch_userland_of_file_added_to_directory() {
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
 
@@ -1894,7 +1898,7 @@ mod tests {
     #[test(async_std::test)]
     async fn search_latest_finds_the_most_recent() {
         let rng = &mut ChaCha12Rng::from_entropy();
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
 
@@ -1943,7 +1947,7 @@ mod tests {
     #[async_std::test]
     async fn cp_can_copy_sub_directory_to_another_valid_location_with_updated_ancestry() {
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
 
@@ -2039,7 +2043,7 @@ mod tests {
     #[async_std::test]
     async fn mv_can_move_sub_directory_to_another_valid_location_with_updated_ancestry() {
         let rng = &mut ChaCha12Rng::from_entropy();
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
 
@@ -2134,7 +2138,7 @@ mod tests {
     #[async_std::test]
     async fn mv_cannot_move_sub_directory_to_invalid_location() {
         let rng = &mut ChaCha12Rng::from_entropy();
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
 
@@ -2173,7 +2177,7 @@ mod tests {
     #[async_std::test]
     async fn mv_can_rename_directories() {
         let rng = &mut ChaCha12Rng::from_entropy();
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
         let content = b"file".to_vec();
@@ -2222,7 +2226,7 @@ mod tests {
     #[async_std::test]
     async fn mv_fails_moving_directories_to_files() {
         let rng = &mut ChaCha12Rng::from_entropy();
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
 
@@ -2269,7 +2273,7 @@ mod tests {
     #[async_std::test]
     async fn write_doesnt_generate_previous_link() {
         let rng = &mut ChaCha12Rng::from_entropy();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let old_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
 
@@ -2294,7 +2298,7 @@ mod tests {
     #[async_std::test]
     async fn store_before_write_generates_previous_link() {
         let rng = &mut ChaCha12Rng::from_entropy();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let old_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
         old_dir.store(forest, store, rng).await.unwrap();
@@ -2320,7 +2324,7 @@ mod tests {
     #[async_std::test]
     async fn search_latest_also_searches_the_root() -> Result<()> {
         let rng = &mut ChaCha12Rng::from_entropy();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048(rng);
         let old_dir =
             PrivateDirectory::new_and_store(&forest.empty_name(), Utc::now(), forest, store, rng)
@@ -2345,7 +2349,7 @@ mod tests {
     #[async_std::test]
     async fn test_regression_read_old_access_key() -> Result<()> {
         let rng = &mut ChaCha12Rng::from_entropy();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048(rng);
         let mut dir =
             PrivateDirectory::new_and_store(&forest.empty_name(), Utc::now(), forest, store, rng)
@@ -2383,7 +2387,7 @@ mod tests {
     #[async_std::test]
     async fn test_regression_read_old_file_access_key() -> Result<()> {
         let rng = &mut ChaCha12Rng::from_entropy();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048(rng);
         let mut dir =
             PrivateDirectory::new_and_store(&forest.empty_name(), Utc::now(), forest, store, rng)
@@ -2424,7 +2428,7 @@ mod tests {
     #[async_std::test]
     async fn test_conflict_reconciliation_merges_dirs() -> TestResult {
         let rng = &mut ChaCha12Rng::from_entropy();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut Arc::new(HamtForest::new_rsa_2048(rng));
         let mut dir =
             PrivateDirectory::new_and_store(&forest.empty_name(), Utc::now(), forest, store, rng)
@@ -2483,7 +2487,7 @@ mod tests {
     #[async_std::test]
     async fn test_conflict_reconciliation_concurrently_created_files() -> TestResult {
         let rng = &mut ChaCha12Rng::from_entropy();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut Arc::new(HamtForest::new_rsa_2048(rng));
         let mut dir =
             PrivateDirectory::new_and_store(&forest.empty_name(), Utc::now(), forest, store, rng)

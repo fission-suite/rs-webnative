@@ -9,12 +9,12 @@ use wnfs::private::{
     forest::{hamt::HamtForest, traits::PrivateForest},
     PrivateFile, PrivateForestContent,
 };
-use wnfs_common::MemoryBlockStore;
+use wnfs_common::blockstore::InMemoryBlockstore;
 
 #[async_std::main]
 async fn main() -> Result<()> {
     // The usual in-memory testing setup for WNFS
-    let store = &MemoryBlockStore::default();
+    let store = &InMemoryBlockstore::<64>::new();
     let rng = &mut ChaCha12Rng::from_entropy();
     let forest = &mut HamtForest::new_rsa_2048(rng);
 

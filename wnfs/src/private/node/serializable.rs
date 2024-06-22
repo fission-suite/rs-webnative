@@ -1,11 +1,10 @@
 use super::SnapshotKey;
 use crate::private::{encrypted::Encrypted, FileContent};
-use libipld_core::cid::Cid;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use skip_ratchet::Ratchet;
 use std::collections::BTreeMap;
-use wnfs_common::{HashOutput, Metadata};
+use wnfs_common::{ipld_core::cid::Cid, HashOutput, Metadata};
 use wnfs_nameaccumulator::{NameAccumulator, NameSegment};
 
 //--------------------------------------------------------------------------------------------------

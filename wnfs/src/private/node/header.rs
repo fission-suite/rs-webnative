@@ -5,11 +5,14 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Result};
 use futures::TryStreamExt;
-use libipld_core::cid::Cid;
 use rand_core::CryptoRngCore;
 use skip_ratchet::Ratchet;
 use std::{collections::BTreeMap, fmt::Debug};
-use wnfs_common::{BlockStore, CODEC_RAW};
+use wnfs_common::{
+    blockstore::{block::Block as _, Blockstore},
+    ipld_core::cid::Cid,
+    Blake3Block, BlockStoreError, CODEC_RAW,
+};
 use wnfs_hamt::Hasher;
 use wnfs_nameaccumulator::{Name, NameSegment};
 
@@ -162,11 +165,14 @@ impl PrivateNodeHeader {
     /// BlockStore and returns its CID.
     ///
     /// This *does not* store the block itself in the forest, only in the given block store.
-    pub async fn store(&self, store: &impl BlockStore, forest: &impl PrivateForest) -> Result<Cid> {
+    pub async fn store(&self, store: &impl Blockstore, forest: &impl PrivateForest) -> Result<Cid> {
         let temporal_key = self.derive_temporal_key();
         let cbor_bytes = serde_ipld_dagcbor::to_vec(&self.to_serializable(forest))?;
         let ciphertext = temporal_key.key_wrap_encrypt(&cbor_bytes)?;
-        Ok(store.put_block(ciphertext, CODEC_RAW).await?)
+        let block = Blake3Block::new(CODEC_RAW, ciphertext);
+        let cid = block.cid()?;
+        store.put(block).await?;
+        Ok(cid)
     }
 
     pub(crate) fn to_serializable(
@@ -194,10 +200,13 @@ impl PrivateNodeHeader {
         cid: &Cid,
         temporal_key: &TemporalKey,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         parent_name: Option<Name>,
     ) -> Result<Self> {
-        let ciphertext = store.get_block(cid).await?;
+        let ciphertext = store
+            .get(cid)
+            .await?
+            .ok_or_else(|| BlockStoreError::CIDNotFound(*cid))?;
         let cbor_bytes = temporal_key.key_wrap_decrypt(&ciphertext)?;
         let decoded: PrivateNodeHeaderSerializable = serde_ipld_dagcbor::from_slice(&cbor_bytes)?;
         let serialized_name = decoded.name.clone();
@@ -221,7 +230,7 @@ impl PrivateNodeHeader {
     pub(crate) async fn get_multivalue(
         &self,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Vec<(Cid, PrivateNode)>> {
         let mountpoint = self.name.parent();
 
@@ -239,7 +248,7 @@ impl PrivateNodeHeader {
     pub(crate) async fn seek_unmerged_heads(
         &mut self,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<BTreeMap<Cid, PrivateNode>> {
         let mut previous_keys = Vec::with_capacity(1);
         let mut heads = BTreeMap::new();

@@ -1,8 +1,7 @@
-use libipld_core::cid::Cid;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use wnfs_common::Metadata;
+use wnfs_common::{ipld_core::cid::Cid, Metadata};
 
 //--------------------------------------------------------------------------------------------------
 // Type Definitions

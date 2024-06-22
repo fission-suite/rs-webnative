@@ -7,7 +7,6 @@ use crate::{
 use anyhow::{anyhow, bail, ensure, Result};
 use bytes::Bytes;
 use futures::FutureExt;
-use libipld::Cid;
 use prost::Message;
 use std::{
     collections::VecDeque,
@@ -17,8 +16,10 @@ use std::{
 };
 use tokio::io::{AsyncRead, AsyncSeek};
 use wnfs_common::{
+    blockstore::Blockstore,
+    ipld_core::cid::Cid,
     utils::{boxed_fut, BoxFuture},
-    BlockStore, LoadIpld, Storable, StoreIpld,
+    BlockStoreError, LoadIpld, Storable, StoreIpld,
 };
 
 #[derive(
@@ -92,9 +93,12 @@ impl UnixFsFile {
         UnixFsFile::Raw(Bytes::new())
     }
 
-    pub async fn load(cid: &Cid, store: &impl BlockStore) -> Result<Self> {
-        let block = store.get_block(cid).await?;
-        Self::decode(cid, block)
+    pub async fn load(cid: Cid, store: &impl Blockstore) -> Result<Self> {
+        let block = store
+            .get(&cid)
+            .await?
+            .ok_or_else(|| BlockStoreError::CIDNotFound(cid))?;
+        Self::decode(&cid, Bytes::from(block))
     }
 
     pub fn decode(cid: &Cid, buf: Bytes) -> Result<Self> {
@@ -204,7 +208,7 @@ impl UnixFsFile {
             .transpose()
     }
 
-    pub fn into_content_reader<B: BlockStore>(
+    pub fn into_content_reader<B: Blockstore>(
         self,
         store: &B,
         pos_max: Option<usize>,
@@ -225,7 +229,7 @@ impl UnixFsFile {
 impl Storable for UnixFsFile {
     type Serializable = UnixFsFile;
 
-    async fn to_serializable(&self, _store: &impl BlockStore) -> Result<Self::Serializable> {
+    async fn to_serializable(&self, _store: &impl Blockstore) -> Result<Self::Serializable> {
         Ok(self.clone())
     }
 
@@ -251,7 +255,7 @@ impl LoadIpld for UnixFsFile {
 }
 
 #[derive(Debug)]
-pub struct UnixFsFileReader<'a, B: BlockStore> {
+pub struct UnixFsFileReader<'a, B: Blockstore> {
     root_node: UnixFsFile,
     /// Absolute position in bytes
     pos: usize,
@@ -264,14 +268,14 @@ pub struct UnixFsFileReader<'a, B: BlockStore> {
     store: &'a B,
 }
 
-impl<'a, B: BlockStore> UnixFsFileReader<'a, B> {
+impl<'a, B: Blockstore> UnixFsFileReader<'a, B> {
     /// Returns the size in bytes, if known in advance.
     pub fn size(&self) -> Option<u64> {
         self.root_node.filesize()
     }
 }
 
-impl<'a, B: BlockStore + 'a> AsyncRead for UnixFsFileReader<'a, B> {
+impl<'a, B: Blockstore + 'a> AsyncRead for UnixFsFileReader<'a, B> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -308,7 +312,7 @@ impl<'a, B: BlockStore + 'a> AsyncRead for UnixFsFileReader<'a, B> {
     }
 }
 
-impl<'a, B: BlockStore + 'a> AsyncSeek for UnixFsFileReader<'a, B> {
+impl<'a, B: Blockstore + 'a> AsyncSeek for UnixFsFileReader<'a, B> {
     fn start_seek(mut self: Pin<&mut Self>, position: std::io::SeekFrom) -> std::io::Result<()> {
         let UnixFsFileReader {
             root_node,
@@ -457,7 +461,7 @@ fn load_next_node<'a>(
     next_node_offset: usize,
     current_node: &mut CurrentNodeState<'a>,
     current_links: &mut Vec<VecDeque<Link>>,
-    store: &'a impl BlockStore,
+    store: &'a impl Blockstore,
 ) -> bool {
     let links = loop {
         if let Some(last_mut) = current_links.last_mut() {
@@ -476,15 +480,9 @@ fn load_next_node<'a>(
 
     let link = links.pop_front().unwrap();
 
-    let fut = boxed_fut(async move {
-        let block = store.get_block(&link.cid).await?;
-        let node = UnixFsFile::decode(&link.cid, block)?;
-
-        Ok(node)
-    });
     *current_node = CurrentNodeState::Loading {
         node_offset: next_node_offset,
-        fut,
+        fut: boxed_fut(UnixFsFile::load(link.cid, store)),
     };
     true
 }
@@ -493,7 +491,7 @@ fn load_next_node<'a>(
 fn poll_read_file_at<'a>(
     cx: &mut Context<'_>,
     root_node: &Node,
-    store: &'a impl BlockStore,
+    store: &'a impl Blockstore,
     pos: &mut usize,
     pos_max: Option<usize>,
     buf: &mut tokio::io::ReadBuf<'_>,

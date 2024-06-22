@@ -14,14 +14,15 @@ use anyhow::{bail, ensure, Result};
 use async_once_cell::OnceCell;
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
-use libipld_core::cid::Cid;
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
 };
 use wnfs_common::{
+    blockstore::Blockstore,
+    ipld_core::cid::Cid,
     utils::{boxed_fut, error, Arc},
-    BlockStore, Metadata, NodeType, Storable,
+    Metadata, NodeType, Storable,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -171,7 +172,7 @@ impl PublicDirectory {
     /// without causing further conflicts.
     pub(crate) async fn prepare_next_merge<'a>(
         self: &'a mut Arc<Self>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<&'a mut Self> {
         if self.previous.len() > 1 {
             // This is a merge node
@@ -194,7 +195,7 @@ impl PublicDirectory {
     async fn get_leaf_dir<'a>(
         &'a self,
         path_segments: &[String],
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<SearchResult<&'a Self>> {
         let mut working_dir = self;
         for (depth, segment) in path_segments.iter().enumerate() {
@@ -213,7 +214,7 @@ impl PublicDirectory {
     async fn get_leaf_dir_mut<'a>(
         self: &'a mut Arc<Self>,
         path_segments: &[String],
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<SearchResult<&'a mut Self>> {
         // TODO(matheus23) actually set the modification time of all these nodes
         let mut working_dir = self.prepare_next_revision();
@@ -244,7 +245,7 @@ impl PublicDirectory {
         self: &'a mut Arc<Self>,
         path_segments: &[String],
         time: DateTime<Utc>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<&'a mut Self> {
         match self.get_leaf_dir_mut(path_segments, store).await? {
             SearchResult::Found(dir) => Ok(dir),
@@ -282,7 +283,7 @@ impl PublicDirectory {
     /// #[async_std::main]
     /// async fn main() {
     ///     let dir = &mut PublicDirectory::new_rc(Utc::now());
-    ///     let store = MemoryBlockStore::default();
+    ///     let store = InMemoryBlockstore::<64>::new();
     ///
     ///     dir
     ///         .mkdir(&["pictures".into(), "cats".into()], Utc::now(), &store)
@@ -300,7 +301,7 @@ impl PublicDirectory {
     pub async fn get_node<'a>(
         &'a self,
         path_segments: &[String],
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<&'a PublicNode>> {
         let Some((tail, path)) = path_segments.split_last() else {
             return Ok(None);
@@ -332,7 +333,7 @@ impl PublicDirectory {
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
     ///     let dir = &mut Arc::new(PublicDirectory::new(Utc::now()));
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///
     ///     // Gain a mutable file reference
     ///     let path = &["Documents".into(), "Notes.md".into()];
@@ -353,7 +354,7 @@ impl PublicDirectory {
         self: &'a mut Arc<Self>,
         path_segments: &[String],
         time: DateTime<Utc>,
-        store: &'a impl BlockStore,
+        store: &'a impl Blockstore,
     ) -> Result<&'a mut PublicFile> {
         let (path, filename) = utils::split_last(path_segments)?;
 
@@ -391,7 +392,7 @@ impl PublicDirectory {
     /// #[async_std::main]
     /// async fn main() {
     ///     let dir = &mut PublicDirectory::new_rc(Utc::now());
-    ///     let mut store = MemoryBlockStore::default();
+    ///     let mut store = InMemoryBlockstore::<64>::new();
     ///
     ///     dir
     ///         .mkdir(&["pictures".into(), "cats".into()], Utc::now(), &store)
@@ -406,7 +407,7 @@ impl PublicDirectory {
     pub async fn lookup_node<'a>(
         &'a self,
         path_segment: &str,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<&'a PublicNode>> {
         Ok(match self.userland.get(path_segment) {
             Some(link) => Some(link.resolve_value(store).await?),
@@ -418,7 +419,7 @@ impl PublicDirectory {
     async fn lookup_node_mut<'a>(
         &'a mut self,
         path_segment: &str,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<&'a mut PublicNode>> {
         Ok(match self.userland.get_mut(path_segment) {
             Some(link) => Some(link.resolve_value_mut(store).await?),
@@ -440,7 +441,7 @@ impl PublicDirectory {
     /// #[async_std::main]
     /// async fn main() {
     ///     let dir = &mut PublicDirectory::new_rc(Utc::now());
-    ///     let store = &MemoryBlockStore::default();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let content = b"Hello, World!".to_vec();
     ///
     ///     dir
@@ -461,7 +462,7 @@ impl PublicDirectory {
     ///     assert_eq!(result, content);
     /// }
     /// ```
-    pub async fn read(&self, path_segments: &[String], store: &impl BlockStore) -> Result<Vec<u8>> {
+    pub async fn read(&self, path_segments: &[String], store: &impl Blockstore) -> Result<Vec<u8>> {
         let (path, filename) = utils::split_last(path_segments)?;
         match self.get_leaf_dir(path, store).await? {
             SearchResult::Found(dir) => match dir.lookup_node(filename, store).await? {
@@ -488,7 +489,7 @@ impl PublicDirectory {
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
     ///     let dir = &mut PublicDirectory::new_rc(Utc::now());
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///
     ///     dir
     ///         .write(
@@ -507,7 +508,7 @@ impl PublicDirectory {
         path_segments: &[String],
         content: Vec<u8>,
         time: DateTime<Utc>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<()> {
         let (path, filename) = utils::split_last(path_segments)?;
         let dir = self.get_or_create_leaf_dir_mut(path, time, store).await?;
@@ -545,7 +546,7 @@ impl PublicDirectory {
     /// #[async_std::main]
     /// async fn main() {
     ///     let dir = &mut PublicDirectory::new_rc(Utc::now());
-    ///     let store = MemoryBlockStore::default();
+    ///     let store = InMemoryBlockstore::<64>::new();
     ///
     ///     dir
     ///         .mkdir(&["pictures".into(), "cats".into()], Utc::now(), &store)
@@ -567,7 +568,7 @@ impl PublicDirectory {
         self: &mut Arc<Self>,
         path_segments: &[String],
         time: DateTime<Utc>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<()> {
         let _ = self
             .get_or_create_leaf_dir_mut(path_segments, time, store)
@@ -591,7 +592,7 @@ impl PublicDirectory {
     /// #[async_std::main]
     /// async fn main() {
     ///     let dir = &mut PublicDirectory::new_rc(Utc::now());
-    ///     let store = MemoryBlockStore::default();
+    ///     let store = InMemoryBlockstore::<64>::new();
     ///
     ///     dir
     ///         .write(
@@ -615,7 +616,7 @@ impl PublicDirectory {
     pub async fn ls(
         &self,
         path_segments: &[String],
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Vec<(String, Metadata)>> {
         match self.get_leaf_dir(path_segments, store).await? {
             SearchResult::Found(dir) => {
@@ -652,7 +653,7 @@ impl PublicDirectory {
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
     ///     let dir = &mut PublicDirectory::new_rc(Utc::now());
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///
     ///     dir
     ///         .write(
@@ -685,7 +686,7 @@ impl PublicDirectory {
     pub async fn rm(
         self: &mut Arc<Self>,
         path_segments: &[String],
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<PublicNode> {
         // TODO(matheus23) set modification time
         let (path, node_name) = utils::split_last(path_segments)?;
@@ -719,7 +720,7 @@ impl PublicDirectory {
     /// #[async_std::main]
     /// async fn main() {
     ///     let dir = &mut PublicDirectory::new_rc(Utc::now());
-    ///     let store = MemoryBlockStore::default();
+    ///     let store = InMemoryBlockstore::<64>::new();
     ///
     ///     dir
     ///         .write(
@@ -754,7 +755,7 @@ impl PublicDirectory {
         path_segments_from: &[String],
         path_segments_to: &[String],
         time: DateTime<Utc>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<()> {
         let (path, filename) = utils::split_last(path_segments_to)?;
         let mut removed_node = self.rm(path_segments_from, store).await?;
@@ -792,7 +793,7 @@ impl PublicDirectory {
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
     ///     let dir = &mut PublicDirectory::new_rc(Utc::now());
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///
     ///     dir
     ///         .write(
@@ -826,7 +827,7 @@ impl PublicDirectory {
         path_segments_from: &[String],
         path_segments_to: &[String],
         time: DateTime<Utc>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<()> {
         let (path, filename) = utils::split_last(path_segments_to)?;
         let Some(mut node) = self.get_node(path_segments_from, store).await?.cloned() else {
@@ -853,7 +854,7 @@ impl PublicDirectory {
     pub async fn causal_compare(
         self: Arc<Self>,
         other: Arc<Self>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<Ordering>> {
         let causal_order = PublicNode::Dir(self)
             .causal_compare(&PublicNode::Dir(other), store)
@@ -872,7 +873,7 @@ impl PublicDirectory {
     pub async fn reconcile(
         self: &mut Arc<Self>,
         other: &Arc<Self>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Reconciliation> {
         let causal_order = self.clone().causal_compare(other.clone(), store).await?;
 
@@ -897,7 +898,7 @@ impl PublicDirectory {
     async fn reconcile_helper<'a>(
         self: &'a mut Arc<Self>,
         other: &'a Arc<Self>,
-        store: &'a impl BlockStore,
+        store: &'a impl Blockstore,
         current_path: &[String],
         file_tie_breaks: &mut BTreeSet<Vec<String>>,
     ) -> Result<()> {
@@ -1026,7 +1027,7 @@ impl Clone for PublicDirectory {
 impl Storable for PublicDirectory {
     type Serializable = PublicNodeSerializable;
 
-    async fn to_serializable(&self, store: &impl BlockStore) -> Result<Self::Serializable> {
+    async fn to_serializable(&self, store: &impl Blockstore) -> Result<Self::Serializable> {
         let userland = {
             let mut map = BTreeMap::new();
             for (name, link) in self.userland.iter() {
@@ -1082,14 +1083,13 @@ impl Storable for PublicDirectory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use libipld_core::ipld::Ipld;
     use testresult::TestResult;
-    use wnfs_common::{decode, libipld::cbor::DagCborCodec, MemoryBlockStore};
+    use wnfs_common::{blockstore::InMemoryBlockstore, ipld_core::ipld::Ipld};
 
     #[async_std::test]
     async fn look_up_can_fetch_file_added_to_directory() -> TestResult {
         let root_dir = &mut PublicDirectory::new_rc(Utc::now());
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let time = Utc::now();
 
         root_dir
@@ -1111,7 +1111,7 @@ mod tests {
     #[async_std::test]
     async fn look_up_cannot_fetch_file_not_added_to_directory() {
         let root = PublicDirectory::new(Utc::now());
-        let store = MemoryBlockStore::default();
+        let store = InMemoryBlockstore::<64>::new();
 
         let node = root.lookup_node("Unknown", &store).await;
 
@@ -1123,7 +1123,7 @@ mod tests {
     #[async_std::test]
     async fn get_node_can_fetch_node_from_root_dir() -> TestResult {
         let time = Utc::now();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let root_dir = &mut PublicDirectory::new_rc(time);
 
         root_dir
@@ -1177,7 +1177,7 @@ mod tests {
     #[async_std::test]
     async fn mkdir_can_create_new_directory() -> TestResult {
         let time = Utc::now();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let root_dir = &mut PublicDirectory::new_rc(time);
 
         root_dir
@@ -1196,7 +1196,7 @@ mod tests {
     #[async_std::test]
     async fn ls_can_list_children_under_directory() -> TestResult {
         let time = Utc::now();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let root_dir = &mut PublicDirectory::new_rc(time);
 
         root_dir
@@ -1236,7 +1236,7 @@ mod tests {
     #[async_std::test]
     async fn rm_can_remove_children_from_directory() -> TestResult {
         let time = Utc::now();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let mut root_dir = PublicDirectory::new_rc(time);
 
         root_dir
@@ -1277,7 +1277,7 @@ mod tests {
 
     #[async_std::test]
     async fn read_can_fetch_userland_of_file_added_to_directory() -> TestResult {
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let time = Utc::now();
         let content = b"Hello".to_vec();
         let mut root_dir = PublicDirectory::new_rc(time);
@@ -1296,7 +1296,7 @@ mod tests {
     #[async_std::test]
     async fn mv_can_move_sub_directory_to_another_valid_location() -> TestResult {
         let time = Utc::now();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let mut root_dir = PublicDirectory::new_rc(time);
 
         root_dir
@@ -1343,7 +1343,7 @@ mod tests {
     #[async_std::test]
     async fn mv_cannot_move_sub_directory_to_invalid_location() {
         let time = Utc::now();
-        let store = MemoryBlockStore::default();
+        let store = InMemoryBlockstore::<64>::new();
         let mut root_dir = PublicDirectory::new_rc(time);
 
         root_dir
@@ -1375,7 +1375,7 @@ mod tests {
     #[async_std::test]
     async fn mv_can_rename_directories() -> TestResult {
         let time = Utc::now();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let root_dir = &mut PublicDirectory::new_rc(time);
 
         root_dir
@@ -1401,7 +1401,7 @@ mod tests {
     #[async_std::test]
     async fn mv_fails_moving_directories_to_files() -> TestResult {
         let time = Utc::now();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let root_dir = &mut PublicDirectory::new_rc(time);
 
         root_dir
@@ -1429,18 +1429,18 @@ mod tests {
     #[async_std::test]
     async fn previous_links_get_set() {
         let time = Utc::now();
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let root_dir = &mut PublicDirectory::new_rc(time);
         let previous_cid = root_dir.store(store).await.unwrap();
 
         root_dir.mkdir(&["test".into()], time, store).await.unwrap();
 
-        let ipld: Ipld = decode(
+        let ipld: Ipld = serde_ipld_dagcbor::from_slice(
             &store
-                .get_block(&root_dir.store(store).await.unwrap())
+                .get(&root_dir.store(store).await.unwrap())
                 .await
+                .unwrap()
                 .unwrap(),
-            DagCborCodec,
         )
         .unwrap();
         match ipld {
@@ -1460,7 +1460,7 @@ mod tests {
     #[async_std::test]
     async fn prepare_next_revision_shortcuts_if_possible() {
         let time = Utc::now();
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let root_dir = &mut PublicDirectory::new_rc(time);
 
         let previous_cid = &root_dir.store(store).await.unwrap();
@@ -1483,7 +1483,7 @@ mod tests {
         // we should be left with `b.txt` removed, while `file.txt` is there.
 
         let time = Utc::now();
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let root_dir = &mut PublicDirectory::new_rc(time);
         root_dir.store(store).await?;
         root_dir.write(path1, vec![0], time, store).await?;
@@ -1509,13 +1509,12 @@ mod tests {
 #[cfg(test)]
 mod proptests {
     use super::*;
-    use libipld_core::ipld::Ipld;
     use proptest::{
         collection::{btree_map, vec},
         prelude::*,
     };
     use test_strategy::proptest;
-    use wnfs_common::MemoryBlockStore;
+    use wnfs_common::{blockstore::InMemoryBlockstore, ipld_core::ipld::Ipld};
 
     type MockMetadata = String;
 
@@ -1572,7 +1571,7 @@ mod proptests {
     async fn convert_fs(
         fs: FileSystem,
         time: DateTime<Utc>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Arc<PublicDirectory>> {
         let mut dir = PublicDirectory::new_rc(time);
         let FileSystem { files, dirs } = fs;
@@ -1607,7 +1606,7 @@ mod proptests {
     #[proptest]
     fn test_merge_directory_preferred(#[strategy(vec(simple_string(), 1..10))] path: Vec<String>) {
         async_std::task::block_on(async move {
-            let store = &MemoryBlockStore::new();
+            let store = &InMemoryBlockstore::<64>::new();
             let time = Utc::now();
 
             let root0 = &mut PublicDirectory::new_rc(time);
@@ -1640,7 +1639,7 @@ mod proptests {
         #[strategy(file_system())] fs1: FileSystem,
     ) {
         async_std::task::block_on(async move {
-            let store = &MemoryBlockStore::new();
+            let store = &InMemoryBlockstore::<64>::new();
             let time = Utc::now();
 
             let root0 = convert_fs(fs0, time, store).await.unwrap();
@@ -1667,7 +1666,7 @@ mod proptests {
         #[strategy(file_system())] fs2: FileSystem,
     ) {
         async_std::task::block_on(async move {
-            let store = &MemoryBlockStore::new();
+            let store = &InMemoryBlockstore::<64>::new();
             let time = Utc::now();
             let root0 = convert_fs(fs0, time, store).await.unwrap();
             let root1 = convert_fs(fs1, time, store).await.unwrap();
@@ -1697,7 +1696,7 @@ mod proptests {
         #[strategy(file_system())] fs1: FileSystem,
     ) {
         async_std::task::block_on(async move {
-            let store = &MemoryBlockStore::new();
+            let store = &InMemoryBlockstore::<64>::new();
             let time = Utc::now();
 
             let mut all_dirs = fs0.dirs.keys().cloned().collect::<BTreeSet<_>>();

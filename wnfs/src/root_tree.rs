@@ -11,19 +11,16 @@ use anyhow::{bail, Result};
 #[cfg(test)]
 use chrono::TimeZone;
 use chrono::{DateTime, Utc};
-use libipld_core::cid::Cid;
 use rand_chacha::ChaCha12Rng;
 use rand_core::{CryptoRngCore, SeedableRng};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-#[cfg(test)]
-use wnfs_common::MemoryBlockStore;
 use wnfs_common::{
-    decode, encode,
-    libipld::cbor::DagCborCodec,
+    blockstore::{block::Block as _, Blockstore},
+    ipld_core::cid::Cid,
     utils::{Arc, CondSend},
-    BlockStore, Metadata, Storable,
+    Blake3Block, BlockStoreError, Metadata, Storable, CODEC_DAG_CBOR,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -31,7 +28,7 @@ use wnfs_common::{
 //--------------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
-pub struct RootTree<B: BlockStore> {
+pub struct RootTree<B: Blockstore> {
     pub store: B,
     pub forest: Arc<HamtForest>,
     pub public_root: Arc<PublicDirectory>,
@@ -59,7 +56,7 @@ pub enum Partition {
 // Implementations
 //--------------------------------------------------------------------------------------------------
 
-impl<B: BlockStore> RootTree<B> {
+impl<B: Blockstore> RootTree<B> {
     pub fn empty_with(store: B, rng: &mut impl CryptoRngCore, time: DateTime<Utc>) -> RootTree<B> {
         Self {
             store,
@@ -423,17 +420,20 @@ impl<B: BlockStore> RootTree<B> {
             version: WNFS_VERSION,
         };
 
-        let cid = self
-            .store
-            .put_block(encode(&serializable, DagCborCodec)?, DagCborCodec.into())
-            .await?;
+        let block = Blake3Block::new(CODEC_DAG_CBOR, serde_ipld_dagcbor::to_vec(&serializable)?);
+        let cid = block.cid()?;
+        self.store.put(block).await?;
 
         Ok(cid)
     }
 
     pub async fn load(cid: &Cid, store: B) -> Result<RootTree<B>> {
-        let deserialized: RootTreeSerializable =
-            decode(&store.get_block(cid).await?, DagCborCodec)?;
+        let deserialized: RootTreeSerializable = serde_ipld_dagcbor::from_slice(
+            &store
+                .get(cid)
+                .await?
+                .ok_or_else(|| BlockStoreError::CIDNotFound(*cid))?,
+        )?;
         let forest = Arc::new(HamtForest::load(&deserialized.forest, &store).await?);
         let public_root = Arc::new(PublicDirectory::load(&deserialized.public, &store).await?);
         let exchange_root = Arc::new(PublicDirectory::load(&deserialized.exchange, &store).await?);
@@ -455,10 +455,11 @@ impl<B: BlockStore> RootTree<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wnfs_common::blockstore::InMemoryBlockstore;
 
     #[async_std::test]
     async fn test_roots_read_write() {
-        let store = MemoryBlockStore::default();
+        let store = InMemoryBlockstore::<64>::new();
         let mut root_tree = RootTree::empty(store);
         root_tree
             .create_private_root(&["private".into()])

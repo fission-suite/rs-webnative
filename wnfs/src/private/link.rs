@@ -5,11 +5,12 @@ use crate::utils::OnceCellDebug;
 use anyhow::{anyhow, Result};
 use async_once_cell::OnceCell;
 use async_recursion::async_recursion;
-use libipld_core::{cid::Cid, multihash::MultihashGeneric};
+use multihash::Multihash;
 use rand_core::CryptoRngCore;
 use wnfs_common::{
+    blockstore::Blockstore,
+    ipld_core::cid::Cid,
     utils::{Arc, CondSend},
-    BlockStore,
 };
 use wnfs_nameaccumulator::Name;
 
@@ -51,7 +52,7 @@ impl PrivateLink {
     pub(crate) async fn resolve_ref(
         &self,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<PrivateRef> {
         match self {
@@ -65,7 +66,7 @@ impl PrivateLink {
     pub(crate) async fn resolve_node(
         &self,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         parent_name: Option<Name>,
     ) -> Result<&PrivateNode> {
         match self {
@@ -87,7 +88,7 @@ impl PrivateLink {
     pub(crate) async fn resolve_node_mut(
         &mut self,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         parent_name: Option<Name>,
     ) -> Result<&mut PrivateNode> {
         match self {
@@ -120,7 +121,7 @@ impl PrivateLink {
     pub(crate) async fn resolve_owned_node(
         self,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         parent_name: Option<Name>,
     ) -> Result<PrivateNode> {
         match self {
@@ -159,7 +160,7 @@ impl PrivateLink {
         Self::from(PrivateNode::File(Arc::new(file)))
     }
 
-    pub(crate) fn crdt_tiebreaker(&self) -> Result<MultihashGeneric<64>> {
+    pub(crate) fn crdt_tiebreaker(&self) -> Result<Multihash<64>> {
         Ok(*self.get_content_cid().ok_or_else(|| anyhow!("Impossible case: CRDT tiebreaker needed on node wasn't persisted before tie breaking"))?.hash())
     }
 }

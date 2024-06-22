@@ -9,9 +9,8 @@ use crate::{
 use anyhow::{bail, Result};
 use async_once_cell::OnceCell;
 use chrono::{DateTime, Utc};
-use libipld_core::cid::Cid;
 use std::{cmp::Ordering, collections::BTreeSet};
-use wnfs_common::{utils::Arc, BlockStore, Storable};
+use wnfs_common::{blockstore::Blockstore, ipld_core::cid::Cid, utils::Arc, Storable};
 
 //--------------------------------------------------------------------------------------------------
 // Type Definitions
@@ -243,12 +242,12 @@ impl PublicNode {
     pub async fn causal_compare(
         &self,
         other: &Self,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<Ordering>> {
         async fn next_previous_set(
             previous_set: BTreeSet<Cid>,
             visited_cids: &mut BTreeSet<Cid>,
-            store: &impl BlockStore,
+            store: &impl Blockstore,
         ) -> Result<BTreeSet<Cid>> {
             let mut previous = BTreeSet::new();
 
@@ -347,7 +346,7 @@ impl From<PublicDirectory> for PublicNode {
 impl Storable for PublicNode {
     type Serializable = PublicNodeSerializable;
 
-    async fn to_serializable(&self, store: &impl BlockStore) -> Result<Self::Serializable> {
+    async fn to_serializable(&self, store: &impl Blockstore) -> Result<Self::Serializable> {
         Ok(match self {
             Self::File(file) => file.to_serializable(store).await?,
             Self::Dir(dir) => dir.to_serializable(store).await?,
@@ -386,11 +385,11 @@ mod tests {
     use crate::public::{PublicDirectory, PublicFile, PublicNode};
     use chrono::Utc;
     use testresult::TestResult;
-    use wnfs_common::{MemoryBlockStore, Storable};
+    use wnfs_common::{blockstore::InMemoryBlockstore, Storable};
 
     #[async_std::test]
     async fn serialized_public_node_can_be_deserialized() -> TestResult {
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let dir_node: PublicNode = PublicDirectory::new(Utc::now()).into();
         let file_node: PublicNode = PublicFile::new(Utc::now()).into();
 
@@ -416,7 +415,7 @@ mod proptests {
     use futures::{stream, StreamExt, TryStreamExt};
     use proptest::{collection::vec, prelude::*};
     use test_strategy::proptest;
-    use wnfs_common::MemoryBlockStore;
+    use wnfs_common::blockstore::InMemoryBlockstore;
 
     #[derive(Debug, Clone, Copy)]
     enum Operation {
@@ -455,7 +454,7 @@ mod proptests {
             &mut self.heads[n % len] // so we don't need to account for the current state (number of heads) when generating n
         }
 
-        pub async fn run(&mut self, op: &Operation, store: &impl BlockStore) -> Result<()> {
+        pub async fn run(&mut self, op: &Operation, store: &impl Blockstore) -> Result<()> {
             match op {
                 Operation::Write(n) => {
                     let head = self.get_head_mut(*n);
@@ -485,7 +484,7 @@ mod proptests {
         pub async fn run_all(
             &mut self,
             ops: impl IntoIterator<Item = Operation>,
-            store: &impl BlockStore,
+            store: &impl Blockstore,
         ) -> Result<()> {
             for op in ops {
                 self.run(&op, store).await?;
@@ -513,7 +512,7 @@ mod proptests {
     async fn run_ops(
         init_time: i64,
         operations: impl IntoIterator<Item = Operation>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<PublicNode> {
         let mut state = State::new(init_time);
         state.run_all(operations, store).await?;
@@ -524,7 +523,7 @@ mod proptests {
     fn test_reflexivity(#[strategy(vec(op(), 0..100))] operations: Vec<Operation>) {
         async_std::task::block_on(async move {
             let mut state = State::new(0);
-            let store = &MemoryBlockStore::new();
+            let store = &InMemoryBlockstore::<64>::new();
 
             state.run_all(operations, store).await.unwrap();
             let head_one = state.head_node();
@@ -545,7 +544,7 @@ mod proptests {
         #[strategy(vec(op(), 0..30))] operations_two: Vec<Operation>,
     ) {
         async_std::task::block_on(async move {
-            let store = &MemoryBlockStore::new();
+            let store = &InMemoryBlockstore::<64>::new();
             let node_one = run_ops(0, operations_one, store).await.unwrap();
             let node_two = run_ops(0, operations_two, store).await.unwrap();
 
@@ -572,7 +571,7 @@ mod proptests {
         #[strategy(vec(op(), 0..20))] operations2: Vec<Operation>,
     ) {
         async_std::task::block_on(async move {
-            let store = &MemoryBlockStore::new();
+            let store = &InMemoryBlockstore::<64>::new();
             let node0 = run_ops(0, operations0, store).await.unwrap();
             let node1 = run_ops(0, operations1, store).await.unwrap();
             let node2 = run_ops(0, operations2, store).await.unwrap();
@@ -621,7 +620,7 @@ mod proptests {
         #[strategy(vec(op(), 0..100))] operations1: Vec<Operation>,
     ) {
         async_std::task::block_on(async move {
-            let store = &MemoryBlockStore::new();
+            let store = &InMemoryBlockstore::<64>::new();
             let node0 = run_ops(0, operations0, store).await.unwrap();
             let node1 = run_ops(1, operations1, store).await.unwrap();
 
@@ -638,7 +637,7 @@ mod proptests {
     ) {
         async_std::task::block_on(async move {
             let mut state = State::new(0);
-            let store = &MemoryBlockStore::new();
+            let store = &InMemoryBlockstore::<64>::new();
 
             state.run_all(operations, store).await.unwrap();
             let head_one = state.head_node();

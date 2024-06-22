@@ -523,6 +523,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "blockstore"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "358358b19add120a5afc3dd1c8e9161d6d06c44dfec2ef8da58b7fe5c369c90d"
+dependencies = [
+ "cid 0.11.1",
+ "dashmap",
+ "multihash 0.19.1",
+ "thiserror",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1363,6 +1375,18 @@ dependencies = [
  "cid 0.11.1",
  "serde",
  "serde_bytes",
+]
+
+[[package]]
+name = "ipld-dagpb"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5eb3c08f1508fa62ffe1a805aafa116d2eb034b3542c85596db132f279abc47"
+dependencies = [
+ "bytes",
+ "ipld-core",
+ "quick-protobuf",
+ "thiserror",
 ]
 
 [[package]]
@@ -2321,6 +2345,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_ipld_dagjson"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3359b47ba7f4a306ef5984665e10539e212e97217afa489437d533208eecda36"
+dependencies = [
+ "ipld-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "serde_json"
 version = "1.0.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3109,7 +3144,6 @@ dependencies = [
  "futures",
  "hex",
  "insta",
- "libipld-core",
  "multihash 0.19.1",
  "once_cell",
  "proptest",
@@ -3123,6 +3157,7 @@ dependencies = [
  "serde-byte-array",
  "serde_bytes",
  "serde_ipld_dagcbor 0.6.1",
+ "serde_ipld_dagjson",
  "serde_json",
  "sha2",
  "sha3",
@@ -3165,12 +3200,14 @@ dependencies = [
  "async-std",
  "base64",
  "base64-serde",
+ "blake3",
+ "blockstore",
  "bytes",
  "chrono",
- "cid 0.10.1",
- "dashmap",
+ "cid 0.11.1",
  "futures",
- "libipld",
+ "ipld-core",
+ "ipld-dagpb",
  "multihash 0.18.1",
  "once_cell",
  "parking_lot",
@@ -3179,7 +3216,9 @@ dependencies = [
  "rand_core",
  "serde",
  "serde_ipld_dagcbor 0.4.2",
+ "serde_ipld_dagjson",
  "serde_json",
+ "testresult 0.4.0",
  "thiserror",
 ]
 
@@ -3197,7 +3236,6 @@ dependencies = [
  "either",
  "futures",
  "insta",
- "libipld",
  "log",
  "multihash 0.18.1",
  "once_cell",
@@ -3237,6 +3275,7 @@ dependencies = [
  "rug",
  "serde",
  "serde_bytes",
+ "serde_ipld_dagcbor 0.6.1",
  "serde_json",
  "test-strategy",
  "thiserror",
@@ -3254,7 +3293,6 @@ dependencies = [
  "bytes",
  "data-encoding",
  "futures",
- "libipld",
  "num_enum",
  "proptest",
  "prost",

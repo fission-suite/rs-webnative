@@ -1,12 +1,13 @@
 use super::{error::HamtError, hash::Hasher, Node, HAMT_VALUES_BUCKET_SIZE};
 use crate::serializable::PointerSerializable;
 use anyhow::Result;
-use libipld::Cid;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use wnfs_common::{
+    blockstore::Blockstore,
+    ipld_core::cid::Cid,
     utils::{error, Arc, CondSync},
-    BlockStore, Link, Storable,
+    Link, Storable,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -62,7 +63,7 @@ impl<K, V> Pair<K, V> {
 
 impl<K: CondSync, V: CondSync, H: Hasher + CondSync> Pointer<K, V, H> {
     /// Converts a Link pointer to a canonical form to ensure consistent tree representation after deletes.
-    pub async fn canonicalize(self, store: &impl BlockStore) -> Result<Option<Self>>
+    pub async fn canonicalize(self, store: &impl Blockstore) -> Result<Option<Self>>
     where
         K: Storable + Clone + AsRef<[u8]>,
         V: Storable + Clone,
@@ -119,7 +120,7 @@ where
 {
     type Serializable = PointerSerializable<K::Serializable, V::Serializable>;
 
-    async fn to_serializable(&self, store: &impl BlockStore) -> Result<Self::Serializable> {
+    async fn to_serializable(&self, store: &impl Blockstore) -> Result<Self::Serializable> {
         Ok(match self {
             Pointer::Values(values) => {
                 let mut serializables = Vec::with_capacity(values.len());
@@ -161,7 +162,7 @@ where
 {
     type Serializable = (K::Serializable, V::Serializable);
 
-    async fn to_serializable(&self, store: &impl BlockStore) -> Result<Self::Serializable> {
+    async fn to_serializable(&self, store: &impl Blockstore) -> Result<Self::Serializable> {
         let key = self.key.to_serializable(store).await?;
         let value = self.value.to_serializable(store).await?;
         Ok((key, value))
@@ -227,11 +228,11 @@ where
 mod tests {
     use super::*;
     use testresult::TestResult;
-    use wnfs_common::MemoryBlockStore;
+    use wnfs_common::blockstore::InMemoryBlockstore;
 
     #[async_std::test]
     async fn pointer_can_encode_decode_as_cbor() -> TestResult {
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let pointer: Pointer<String, i32, blake3::Hasher> = Pointer::Values(vec![
             Pair {
                 key: "James".into(),

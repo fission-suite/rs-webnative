@@ -1,7 +1,8 @@
-use crate::{utils::CondSync, BlockStore, Storable};
+use crate::{utils::CondSync, Storable};
 use anyhow::Result;
 use async_once_cell::OnceCell;
-use libipld::Cid;
+use blockstore::Blockstore;
+use cid::Cid;
 use std::fmt::{self, Debug, Formatter};
 
 //--------------------------------------------------------------------------------------------------
@@ -12,7 +13,7 @@ use std::fmt::{self, Debug, Formatter};
 ///
 /// It supports representing the "link" with a Cid or the deserialized value itself.
 ///
-/// Link needs a `BlockStore` to be able to resolve Cids to corresponding values of `T` and vice versa.
+/// Link needs a `Blockstore` to be able to resolve Cids to corresponding values of `T` and vice versa.
 pub enum Link<T> {
     /// A variant of `Link` that started out as a `Cid`.
     /// If the decoded value is resolved using `resolve_value`, then the `value_cache` gets populated and
@@ -39,7 +40,7 @@ impl<T: Storable + CondSync> Link<T> {
     }
 
     /// Gets the Cid stored in type. It attempts to get it from the store if it is not present in type.
-    pub async fn resolve_cid(&self, store: &impl BlockStore) -> Result<Cid> {
+    pub async fn resolve_cid(&self, store: &impl Blockstore) -> Result<Cid> {
         match self {
             Self::Encoded { cid, .. } => Ok(*cid),
             Self::Decoded { value } => value.store(store).await,
@@ -47,7 +48,7 @@ impl<T: Storable + CondSync> Link<T> {
     }
 
     /// Gets the value stored in link. It attempts to get it from the store if it is not present in link.
-    pub async fn resolve_value(&self, store: &impl BlockStore) -> Result<&T> {
+    pub async fn resolve_value(&self, store: &impl Blockstore) -> Result<&T> {
         match self {
             Self::Encoded { cid, value_cache } => {
                 value_cache.get_or_try_init(T::load(cid, store)).await
@@ -57,7 +58,7 @@ impl<T: Storable + CondSync> Link<T> {
     }
 
     /// Gets mut value stored in link. It attempts to get it from the store if it is not present in link.
-    pub async fn resolve_value_mut(&mut self, store: &impl BlockStore) -> Result<&mut T> {
+    pub async fn resolve_value_mut(&mut self, store: &impl Blockstore) -> Result<&mut T> {
         match self {
             Self::Encoded { cid, value_cache } => {
                 let value = match value_cache.take() {
@@ -97,7 +98,7 @@ impl<T: Storable + CondSync> Link<T> {
     }
 
     /// Gets an owned value from type. It attempts to it get from the store if it is not present in type.
-    pub async fn resolve_owned_value(self, store: &impl BlockStore) -> Result<T>
+    pub async fn resolve_owned_value(self, store: &impl Blockstore) -> Result<T>
     where
         T: Storable,
     {
@@ -124,7 +125,7 @@ impl<T: Storable + CondSync> Link<T> {
     }
 
     /// Compares two links for equality. Attempts to get them from store if they are not already cached.
-    pub async fn deep_eq(&self, other: &Link<T>, store: &impl BlockStore) -> Result<bool>
+    pub async fn deep_eq(&self, other: &Link<T>, store: &impl Blockstore) -> Result<bool>
     where
         T: PartialEq + Storable,
     {
@@ -215,10 +216,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{BlockStore, Link, MemoryBlockStore, Storable};
+    use crate::{Link, Storable};
     use anyhow::Result;
     use async_once_cell::OnceCell;
-    use libipld::Cid;
+    use blockstore::{Blockstore, InMemoryBlockstore};
+    use cid::Cid;
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize)]
@@ -231,7 +233,7 @@ mod tests {
     impl Storable for Example {
         type Serializable = Example;
 
-        async fn to_serializable(&self, _store: &impl BlockStore) -> Result<Self::Serializable> {
+        async fn to_serializable(&self, _store: &impl Blockstore) -> Result<Self::Serializable> {
             Ok(self.clone())
         }
 
@@ -279,7 +281,7 @@ mod tests {
 
     #[async_std::test]
     async fn link_value_can_be_resolved() {
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let example = Example::new(256);
         let cid = example.store(store).await.unwrap();
         let link = Link::<Example>::from_cid(cid);
@@ -292,7 +294,7 @@ mod tests {
     #[async_std::test]
     async fn link_cid_can_be_resolved() {
         let example = Example::new(12_000_500);
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let link = Link::<Example>::from(example.clone());
 
         let cid = link.resolve_cid(store).await.unwrap();

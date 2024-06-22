@@ -7,7 +7,6 @@ use rsa::{traits::PublicKeyParts, BigUint, Oaep, RsaPrivateKey, RsaPublicKey};
 use sha2::Sha256;
 use std::sync::Arc;
 use wnfs::{
-    common::{BlockStore, MemoryBlockStore},
     private::{
         forest::{hamt::HamtForest, traits::PrivateForest},
         share::{recipient, sharer},
@@ -15,6 +14,7 @@ use wnfs::{
     },
     public::{PublicDirectory, PublicLink},
 };
+use wnfs_common::blockstore::{Blockstore, InMemoryBlockstore};
 
 //--------------------------------------------------------------------------------------------------
 // Example Code
@@ -24,7 +24,7 @@ use wnfs::{
 async fn main() -> Result<()> {
     // We use a single in-memory block store for this example.
     // In practice, there would actually be network transfer involved.
-    let store = &MemoryBlockStore::new();
+    let store = &InMemoryBlockstore::<64>::new();
 
     // We create a directory, write something to it and get the private forest
     // and the directory's access key:
@@ -52,7 +52,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn root_dir_setup(store: &impl BlockStore) -> Result<(Arc<HamtForest>, AccessKey)> {
+async fn root_dir_setup(store: &impl Blockstore) -> Result<(Arc<HamtForest>, AccessKey)> {
     // We generate a new simple example file system:
     let rng = &mut ChaCha12Rng::from_entropy();
     let forest = &mut HamtForest::new_trusted_rc(rng);
@@ -81,7 +81,7 @@ async fn root_dir_setup(store: &impl BlockStore) -> Result<(Arc<HamtForest>, Acc
 async fn setup_seeded_keypair_access(
     forest: &mut Arc<HamtForest>,
     access_key: AccessKey,
-    store: &impl BlockStore,
+    store: &impl Blockstore,
 ) -> Result<Mnemonic> {
     // Create a random mnemonic and derive a keypair from it
     let mnemonic = Mnemonic::new(MnemonicType::Words12, Language::English);
@@ -134,7 +134,7 @@ async fn setup_seeded_keypair_access(
 async fn regain_access_from_mnemonic(
     forest: &HamtForest,
     mnemonic: Mnemonic,
-    store: &impl BlockStore,
+    store: &impl Blockstore,
 ) -> Result<PrivateNode> {
     // Re-derive the same private key from the seed phrase
     let seed = Seed::new(&mnemonic, /* optional password */ "");

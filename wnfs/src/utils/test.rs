@@ -5,11 +5,9 @@ use crate::private::{
 };
 use anyhow::Result;
 use bytes::Bytes;
-use libipld_core::ipld::Ipld;
 use rand_core::CryptoRngCore;
 use wnfs_common::{
-    decode,
-    libipld::cbor::DagCborCodec,
+    ipld_core::ipld::Ipld,
     utils::{Arc, BytesToIpld, CondSend, SnapshotBlockStore},
 };
 use wnfs_nameaccumulator::Name;
@@ -20,7 +18,9 @@ struct EncryptedBlockHandler {
 
 impl BytesToIpld for EncryptedBlockHandler {
     fn convert(&self, bytes: &Bytes) -> Result<Ipld> {
-        decode(&self.snapshot_key.decrypt(bytes.as_ref())?, DagCborCodec)
+        Ok(serde_ipld_dagcbor::from_slice(
+            &self.snapshot_key.decrypt(bytes.as_ref())?,
+        )?)
     }
 }
 
@@ -30,10 +30,9 @@ struct KeyWrappedBlockHandler {
 
 impl BytesToIpld for KeyWrappedBlockHandler {
     fn convert(&self, bytes: &Bytes) -> Result<Ipld> {
-        decode(
+        Ok(serde_ipld_dagcbor::from_slice(
             &self.temporal_key.key_wrap_decrypt(bytes.as_ref())?,
-            DagCborCodec,
-        )
+        )?)
     }
 }
 

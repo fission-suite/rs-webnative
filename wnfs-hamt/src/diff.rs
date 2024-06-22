@@ -5,8 +5,9 @@ use async_recursion::async_recursion;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{collections::HashMap, hash::Hash, mem};
 use wnfs_common::{
+    blockstore::Blockstore,
     utils::{Arc, CondSync},
-    BlockStore, Link, Storable,
+    Link, Storable,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -67,11 +68,11 @@ impl<K, V> KeyValueChange<K, V> {
 /// ```
 /// use std::sync::Arc;
 /// use wnfs_hamt::{Node, Pair, diff};
-/// use wnfs_common::{Link, MemoryBlockStore};
+/// use wnfs_common::{Link, MemoryBlockstore};
 ///
 /// #[async_std::main]
 /// async fn main() {
-///     let store = &MemoryBlockStore::new();
+///     let store = &InMemoryBlockstore::<64>::new();
 ///     let main_node = &mut Arc::new(Node::<[u8; 4], String>::default());
 ///     for i in 0u32..3 {
 ///         main_node
@@ -101,7 +102,7 @@ impl<K, V> KeyValueChange<K, V> {
 pub async fn diff<K, V, H>(
     main_link: Link<Arc<Node<K, V, H>>>,
     other_link: Link<Arc<Node<K, V, H>>>,
-    store: &impl BlockStore,
+    store: &impl Blockstore,
 ) -> Result<Vec<KeyValueChange<K, V>>>
 where
     K: Storable + Clone + Eq + Hash + AsRef<[u8]> + CondSync,
@@ -119,7 +120,7 @@ pub async fn diff_helper<K, V, H>(
     main_link: Link<Arc<Node<K, V, H>>>,
     other_link: Link<Arc<Node<K, V, H>>>,
     depth: usize,
-    store: &impl BlockStore,
+    store: &impl Blockstore,
 ) -> Result<Vec<KeyValueChange<K, V>>>
 where
     K: Storable + Clone + Eq + Hash + AsRef<[u8]> + CondSync,
@@ -195,7 +196,7 @@ where
 async fn generate_add_or_remove_changes<K, V, H>(
     node_pointer: &Pointer<K, V, H>,
     r#type: ChangeType,
-    store: &impl BlockStore,
+    store: &impl Blockstore,
 ) -> Result<Vec<KeyValueChange<K, V>>>
 where
     K: Storable + Clone + Eq + Hash + AsRef<[u8]> + CondSync,
@@ -237,7 +238,7 @@ async fn pointers_diff<K, V, H>(
     main_pointer: Pointer<K, V, H>,
     other_pointer: Pointer<K, V, H>,
     depth: usize,
-    store: &impl BlockStore,
+    store: &impl Blockstore,
 ) -> Result<Vec<KeyValueChange<K, V>>>
 where
     K: Storable + Clone + Eq + Hash + AsRef<[u8]> + CondSync,
@@ -309,7 +310,7 @@ where
 async fn create_node_from_pairs<K, V, H>(
     values: Vec<Pair<K, V>>,
     depth: usize,
-    store: &impl BlockStore,
+    store: &impl Blockstore,
 ) -> Result<Arc<Node<K, V, H>>>
 where
     K: Storable + Clone + Eq + Hash + AsRef<[u8]> + CondSync,
@@ -336,7 +337,7 @@ mod tests {
     use super::{ChangeType::*, *};
     use helper::*;
     use std::collections::BTreeSet;
-    use wnfs_common::MemoryBlockStore;
+    use wnfs_common::blockstore::InMemoryBlockstore;
 
     mod helper {
         use crate::Hasher;
@@ -368,7 +369,7 @@ mod tests {
 
     #[async_std::test]
     async fn can_diff_main_node_with_added_removed_pairs() {
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
 
         let main_node = &mut Arc::new(Node::<[u8; 4], String>::default());
         for i in 0u32..3 {
@@ -439,7 +440,7 @@ mod tests {
 
     #[async_std::test]
     async fn can_diff_main_node_with_no_changes() {
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
 
         let main_node = &mut Arc::new(Node::<_, _>::default());
         for i in 0_u32..3 {
@@ -470,7 +471,7 @@ mod tests {
 
     #[async_std::test]
     async fn can_diff_nodes_with_different_structure_and_modified_changes() {
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
 
         // A node that adds the first 3 pairs of HASH_KV_PAIRS.
         let other_node = &mut Arc::new(Node::<_, _, MockHasher>::default());
@@ -608,7 +609,7 @@ mod proptests {
     use proptest::{prop_assert, prop_assert_eq};
     use std::collections::HashSet;
     use test_strategy::proptest;
-    use wnfs_common::{utils::Arc, Link, MemoryBlockStore};
+    use wnfs_common::{blockstore::InMemoryBlockstore, utils::Arc, Link};
 
     #[proptest(cases = 100, max_shrink_iters = 4000)]
     fn diff_correspondence(
@@ -618,7 +619,7 @@ mod proptests {
         ),
     ) {
         task::block_on(async {
-            let store = &MemoryBlockStore::default();
+            let store = &InMemoryBlockstore::<64>::new();
             let (ops, strategy_changes) = ops_changes;
 
             let other_node = &mut strategies::node_from_operations(&ops, store).await.unwrap();
@@ -658,7 +659,7 @@ mod proptests {
         #[strategy(generate_kvs("[a-z0-9]{1,3}", 0u64..1000, 0..100))] kvs2: Vec<(String, u64)>,
     ) {
         task::block_on(async {
-            let store = &MemoryBlockStore::default();
+            let store = &InMemoryBlockstore::<64>::new();
 
             let node1 = strategies::node_from_kvs(kvs1, store).await.unwrap();
             let node2 = strategies::node_from_kvs(kvs2, store).await.unwrap();
@@ -683,7 +684,7 @@ mod proptests {
         #[strategy(generate_kvs("[a-z0-9]{1,3}", 0u64..1000, 0..100))] kvs2: Vec<(String, u64)>,
     ) {
         task::block_on(async {
-            let store = &MemoryBlockStore::default();
+            let store = &InMemoryBlockstore::<64>::new();
 
             let node1 = strategies::node_from_kvs(kvs1, store).await.unwrap();
             let node2 = strategies::node_from_kvs(kvs2, store).await.unwrap();

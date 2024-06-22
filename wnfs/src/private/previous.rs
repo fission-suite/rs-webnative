@@ -4,10 +4,11 @@ use super::{
 };
 use crate::error::FsError;
 use anyhow::{bail, Result};
-use libipld_core::cid::Cid;
 use skip_ratchet::{PreviousIterator, Ratchet};
 use std::collections::BTreeSet;
-use wnfs_common::{utils::Arc, BlockStore, PathNodes, PathNodesResult};
+use wnfs_common::{
+    blockstore::Blockstore, ipld_core::cid::Cid, utils::Arc, PathNodes, PathNodesResult,
+};
 
 //--------------------------------------------------------------------------------------------------
 // Type Definitions
@@ -107,7 +108,7 @@ impl<F: PrivateForest> PrivateNodeHistory<F> {
     /// Returns `None` if there is no such node in the `PrivateForest` at that point in time.
     pub async fn get_previous_node(
         &mut self,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<PrivateNode>> {
         let Some(previous_ratchet) = self.ratchets.next() else {
             return Ok(None);
@@ -157,7 +158,7 @@ impl<F: PrivateForest> PrivateNodeHistory<F> {
     /// That should only happen for all nodes or for none.
     pub async fn get_previous_dir(
         &mut self,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<Arc<PrivateDirectory>>> {
         match self.get_previous_node(store).await? {
             Some(PrivateNode::Dir(dir)) => Ok(Some(dir)),
@@ -173,7 +174,7 @@ impl<F: PrivateForest> PrivateNodeHistory<F> {
     /// That should only happen for all nodes or for none.
     pub async fn get_previous_file(
         &mut self,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<Arc<PrivateFile>>> {
         match self.get_previous_node(store).await? {
             Some(PrivateNode::File(file)) => Ok(Some(file)),
@@ -201,7 +202,7 @@ impl<F: PrivateForest + Clone> PrivateNodeOnPathHistory<F> {
         path_segments: &[String],
         search_latest: bool,
         forest: F,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<PrivateNodeOnPathHistory<F>> {
         // To get the history on a node on a path from a given directory that we
         // know its newest and oldest ratchet of, we need to generate
@@ -273,7 +274,7 @@ impl<F: PrivateForest + Clone> PrivateNodeOnPathHistory<F> {
         target_path_segment: &String,
         search_latest: bool,
         forest: F,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<(Vec<(Arc<PrivateDirectory>, String)>, PrivateNodeHistory<F>)> {
         // We only search for the latest revision in the private node.
         // It may have been deleted in future versions of its ancestor directories.
@@ -335,7 +336,7 @@ impl<F: PrivateForest + Clone> PrivateNodeOnPathHistory<F> {
     /// Step the history one revision back and retrieve the node at the configured path.
     ///
     /// Returns `None` if there is no more previous revisions.
-    pub async fn get_previous(&mut self, store: &impl BlockStore) -> Result<Option<PrivateNode>> {
+    pub async fn get_previous(&mut self, store: &impl Blockstore) -> Result<Option<PrivateNode>> {
         // Finding the previous revision of a node works by trying to get
         // the previous revision of the path elements starting on the deepest
         // path node working upwards, in case the history of lower nodes
@@ -403,7 +404,7 @@ impl<F: PrivateForest + Clone> PrivateNodeOnPathHistory<F> {
     /// more history entries.
     async fn find_and_step_segment_history(
         &mut self,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<Vec<(Arc<PrivateDirectory>, String)>>> {
         let mut working_stack = Vec::with_capacity(self.path.len());
 
@@ -440,7 +441,7 @@ impl<F: PrivateForest + Clone> PrivateNodeOnPathHistory<F> {
     async fn repopulate_segment_histories(
         &mut self,
         working_stack: Vec<(Arc<PrivateDirectory>, String)>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<bool> {
         // Work downwards from the previous history entry of a path segment we found
         for (directory, path_segment) in working_stack {
@@ -501,11 +502,11 @@ mod tests {
     use chrono::Utc;
     use rand_chacha::ChaCha12Rng;
     use rand_core::SeedableRng;
-    use wnfs_common::MemoryBlockStore;
+    use wnfs_common::blockstore::InMemoryBlockstore;
 
     struct TestSetup {
         rng: ChaCha12Rng,
-        store: MemoryBlockStore,
+        store: InMemoryBlockstore<64>,
         forest: Arc<HamtForest>,
         root_dir: Arc<PrivateDirectory>,
         discrepancy_budget: usize,
@@ -514,7 +515,7 @@ mod tests {
     impl TestSetup {
         fn new() -> Self {
             let mut rng = ChaCha12Rng::seed_from_u64(0);
-            let store = MemoryBlockStore::default();
+            let store = InMemoryBlockstore::<64>::new();
             let forest = Arc::new(HamtForest::new_rsa_2048(&mut rng));
             let root_dir = PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), &mut rng);
 

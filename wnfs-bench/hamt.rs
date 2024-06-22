@@ -6,8 +6,9 @@ use criterion::{
 use proptest::{arbitrary::any, collection::vec, test_runner::TestRunner};
 use std::cmp;
 use wnfs_common::{
+    blockstore::{block::Block as _, Blockstore, InMemoryBlockstore},
     utils::{Arc, Sampleable},
-    BlockStore, Link, MemoryBlockStore, Storable, StoreIpld,
+    Blake3Block, Link, Storable, StoreIpld,
 };
 use wnfs_hamt::{
     diff, merge,
@@ -17,7 +18,7 @@ use wnfs_hamt::{
 
 fn node_set(c: &mut Criterion) {
     let mut runner = TestRunner::deterministic();
-    let store = MemoryBlockStore::default();
+    let store = InMemoryBlockstore::<64>::new();
     let operations = operations(any::<[u8; 32]>(), any::<u64>(), 1_000_000).sample(&mut runner);
     let node =
         &async_std::task::block_on(async { node_from_operations(&operations, &store).await })
@@ -50,7 +51,7 @@ fn node_set_consecutive(c: &mut Criterion) {
     c.bench_function("node set 1000 consecutive", |b| {
         b.to_async(AsyncStdExecutor).iter_batched(
             || {
-                let store = MemoryBlockStore::default();
+                let store = InMemoryBlockstore::<64>::new();
                 let operations =
                     operations(any::<[u8; 32]>(), any::<u64>(), 1000).sample(&mut runner);
                 let node = async_std::task::block_on(async {
@@ -73,7 +74,7 @@ fn node_set_consecutive(c: &mut Criterion) {
 }
 
 fn node_load_get(c: &mut Criterion) {
-    let store = MemoryBlockStore::default();
+    let store = InMemoryBlockstore::<64>::new();
     let cid = async_std::task::block_on(async {
         let mut node = Arc::new(<Node<_, _>>::default());
         for i in 0..50 {
@@ -100,7 +101,7 @@ fn node_load_get(c: &mut Criterion) {
 }
 
 fn node_load_remove(c: &mut Criterion) {
-    let store = MemoryBlockStore::default();
+    let store = InMemoryBlockstore::<64>::new();
     let cid = async_std::task::block_on(async {
         let mut node = Arc::new(<Node<_, _>>::default());
         for i in 0..50 {
@@ -123,7 +124,7 @@ fn node_load_remove(c: &mut Criterion) {
 }
 
 fn hamt_load_decode(c: &mut Criterion) {
-    let store = MemoryBlockStore::default();
+    let store = InMemoryBlockstore::<64>::new();
     let (cid, bytes) = async_std::task::block_on(async {
         let mut node = Arc::new(<Node<_, _>>::default());
         for i in 0..50 {
@@ -137,7 +138,9 @@ fn hamt_load_decode(c: &mut Criterion) {
             .encode_ipld()
             .unwrap();
 
-        let cid = store.put_block(encoded_hamt.clone(), codec).await.unwrap();
+        let block = Blake3Block::new(codec, encoded_hamt.clone());
+        let cid = block.cid().unwrap();
+        store.put(block).await.unwrap();
 
         (cid, encoded_hamt)
     });
@@ -157,7 +160,7 @@ fn hamt_set_encode(c: &mut Criterion) {
         b.to_async(AsyncStdExecutor).iter_batched(
             || {
                 (
-                    MemoryBlockStore::default(),
+                    InMemoryBlockstore::<64>::new(),
                     Arc::new(<Node<_, _>>::default()),
                 )
             },
@@ -187,7 +190,7 @@ fn hamt_diff(c: &mut Criterion) {
     c.bench_function("hamt diff", |b| {
         b.to_async(AsyncStdExecutor).iter_batched(
             || {
-                let store = MemoryBlockStore::default();
+                let store = InMemoryBlockstore::<64>::new();
                 let kvs1 = generate_kvs("[a-z0-9]{1,3}", 0u64..1000, 0..100).sample(&mut runner);
                 let kvs2 = generate_kvs("[a-z0-9]{1,3}", 0u64..1000, 0..100).sample(&mut runner);
                 let (node1, node2) = task::block_on(async {
@@ -216,7 +219,7 @@ fn hamt_merge(c: &mut Criterion) {
     c.bench_function("hamt merge", |b| {
         b.to_async(AsyncStdExecutor).iter_batched(
             || {
-                let store = MemoryBlockStore::default();
+                let store = InMemoryBlockstore::<64>::new();
                 let kvs1 = generate_kvs("[a-z0-9]{1,3}", 0u64..1000, 0..100).sample(&mut runner);
                 let kvs2 = generate_kvs("[a-z0-9]{1,3}", 0u64..1000, 0..100).sample(&mut runner);
                 let (node1, node2) = task::block_on(async {

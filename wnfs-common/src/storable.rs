@@ -3,13 +3,14 @@
 //! `PublicNode`, `HamtForest` etc.
 use crate::{
     utils::{Arc, CondSend, CondSync},
-    BlockStore,
+    Blake3Block, BlockStoreError, CODEC_DAG_CBOR,
 };
 use anyhow::{bail, Result};
 use async_once_cell::OnceCell;
+use blockstore::{block::Block, Blockstore};
 use bytes::Bytes;
+use cid::Cid;
 use futures::Future;
-use libipld::{cbor::DagCborCodec, Cid};
 use serde::{de::DeserializeOwned, Serialize};
 
 //--------------------------------------------------------------------------------------------------
@@ -23,11 +24,11 @@ macro_rules! impl_storable_from_serde {
             impl $( < $( $generics ),+ > )? $crate::Storable for $ty $( where $( $generics: ::serde::Serialize + ::serde::de::DeserializeOwned + Clone + $crate::utils::CondSync ),+  )?{
                 type Serializable = $ty;
 
-                async fn to_serializable(&self, _store: &impl $crate::BlockStore) -> ::anyhow::Result<Self::Serializable> {
+                async fn to_serializable(&self, _store: &impl Blockstore) -> ::anyhow::Result<Self::Serializable> {
                     Ok(self.clone())
                 }
 
-                async fn from_serializable(_cid: Option<&$crate::libipld::Cid>, serializable: Self::Serializable) -> ::anyhow::Result<Self> {
+                async fn from_serializable(_cid: Option<&Cid>, serializable: Self::Serializable) -> ::anyhow::Result<Self> {
                     Ok(serializable)
                 }
             }
@@ -62,35 +63,38 @@ pub trait Storable: Sized {
     /// The at-rest representation of this storable type.
     type Serializable: StoreIpld + LoadIpld + CondSync;
 
-    /// Turn the current type into the at-rest representation of this type.
+    /// Turns the current type into the at-rest representation of this type.
     fn to_serializable(
         &self,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> impl Future<Output = Result<Self::Serializable>> + CondSend;
 
-    /// Take an at-rest representation of this type and turn it into the in-memory representation.
+    /// Takes an at-rest representation of this type and turn it into the in-memory representation.
     /// You can use the `cid` parameter to populate a cache.
     fn from_serializable(
         cid: Option<&Cid>,
         serializable: Self::Serializable,
     ) -> impl Future<Output = Result<Self>> + CondSend;
 
-    /// Return a serialization cache, if it exists.
+    /// Returns a serialization cache, if it exists.
     /// By default, this always returns `None`.
     fn persisted_as(&self) -> Option<&OnceCell<Cid>> {
         None
     }
 
-    /// Store this data type in a given `BlockStore`.
+    /// Stores this data type in a given `Blockstore`.
     ///
     /// This will short-circuit by using the `persisted_as` once-cell, if available.
-    fn store(&self, store: &impl BlockStore) -> impl Future<Output = Result<Cid>> + CondSend
+    fn store(&self, store: &impl Blockstore) -> impl Future<Output = Result<Cid>> + CondSend
     where
         Self: CondSync,
     {
         let store_future = async {
             let (bytes, codec) = self.to_serializable(store).await?.encode_ipld()?;
-            Ok(store.put_block(bytes, codec).await?)
+            let block = Blake3Block::new(codec, bytes);
+            let cid = block.cid()?;
+            store.put(block).await?;
+            Ok(cid)
         };
 
         async {
@@ -106,10 +110,13 @@ pub trait Storable: Sized {
     ///
     /// This will pass on the CID to the `from_serializable` function so it can
     /// populate a cache in some cases.
-    fn load(cid: &Cid, store: &impl BlockStore) -> impl Future<Output = Result<Self>> + CondSend {
+    fn load(cid: &Cid, store: &impl Blockstore) -> impl Future<Output = Result<Self>> + CondSend {
         async {
-            let bytes = store.get_block(cid).await?;
-            let serializable = Self::Serializable::decode_ipld(cid, bytes)?;
+            let block = store
+                .get(cid)
+                .await?
+                .ok_or_else(|| BlockStoreError::CIDNotFound(*cid))?;
+            let serializable = Self::Serializable::decode_ipld(cid, Bytes::from(block))?;
             Self::from_serializable(Some(cid), serializable).await
         }
     }
@@ -126,14 +133,14 @@ pub trait LoadIpld: Sized {
 impl<T: Serialize> StoreIpld for T {
     fn encode_ipld(&self) -> Result<(Bytes, u64)> {
         let bytes = serde_ipld_dagcbor::to_vec(self)?;
-        Ok((bytes.into(), DagCborCodec.into()))
+        Ok((bytes.into(), CODEC_DAG_CBOR))
     }
 }
 
 impl<T: DeserializeOwned + Sized> LoadIpld for T {
     fn decode_ipld(cid: &Cid, bytes: Bytes) -> Result<Self> {
         let codec = cid.codec();
-        let dag_cbor: u64 = DagCborCodec.into();
+        let dag_cbor = CODEC_DAG_CBOR;
         if codec != dag_cbor {
             bail!("Expected dag-cbor codec, but got {codec:X} in CID {cid}");
         }
@@ -167,7 +174,7 @@ impl<T: DeserializeOwned + Sized> LoadIpld for T {
 impl<T: Storable + CondSync> Storable for Arc<T> {
     type Serializable = T::Serializable;
 
-    async fn to_serializable(&self, store: &impl BlockStore) -> Result<Self::Serializable> {
+    async fn to_serializable(&self, store: &impl Blockstore) -> Result<Self::Serializable> {
         self.as_ref().to_serializable(store).await
     }
 

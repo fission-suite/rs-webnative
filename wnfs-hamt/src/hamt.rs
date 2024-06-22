@@ -1,13 +1,14 @@
 use super::{KeyValueChange, Node, HAMT_VERSION};
 use crate::{serializable::HamtSerializable, Hasher};
 use anyhow::Result;
-use libipld::Cid;
 use semver::Version;
 use serde::{de::DeserializeOwned, Serialize};
 use std::hash::Hash;
 use wnfs_common::{
+    blockstore::Blockstore,
+    ipld_core::cid::Cid,
     utils::{Arc, CondSync},
-    BlockStore, Link, Storable,
+    Link, Storable,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -111,7 +112,7 @@ impl<K: CondSync, V: CondSync, H: Hasher + CondSync> Hamt<K, V, H> {
     pub async fn diff(
         &self,
         other: &Self,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Vec<KeyValueChange<K, V>>>
     where
         K: Storable + Clone + Eq + Hash + AsRef<[u8]>,
@@ -138,7 +139,7 @@ where
 {
     type Serializable = HamtSerializable<K::Serializable, V::Serializable>;
 
-    async fn to_serializable(&self, store: &impl BlockStore) -> Result<Self::Serializable> {
+    async fn to_serializable(&self, store: &impl Blockstore) -> Result<Self::Serializable> {
         Ok(HamtSerializable {
             root: self.root.to_serializable(store).await?,
             version: self.version.clone(),
@@ -183,11 +184,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wnfs_common::MemoryBlockStore;
+    use wnfs_common::blockstore::InMemoryBlockstore;
 
     #[async_std::test]
     async fn hamt_can_encode_decode_as_cbor() {
-        let store = &MemoryBlockStore::default();
+        let store = &InMemoryBlockstore::<64>::new();
         let root = Arc::new(Node::default());
         let hamt: Hamt<String, i32> = Hamt::with_root(root);
 

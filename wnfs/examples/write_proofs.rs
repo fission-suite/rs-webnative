@@ -1,11 +1,9 @@
 use anyhow::Result;
 use chrono::Utc;
-use libipld_core::cid::Cid;
 use rand_chacha::ChaCha12Rng;
 use rand_core::SeedableRng;
 use std::{collections::BTreeSet, sync::Arc};
 use wnfs::{
-    common::{BlockStore, MemoryBlockStore},
     nameaccumulator::NameAccumulator,
     private::{
         forest::{
@@ -16,14 +14,18 @@ use wnfs::{
         AccessKey, PrivateDirectory, PrivateNode,
     },
 };
-use wnfs_common::Storable;
+use wnfs_common::{
+    blockstore::{Blockstore, InMemoryBlockstore},
+    ipld_core::cid::Cid,
+    Storable,
+};
 
 #[async_std::main]
 async fn main() -> Result<()> {
     // In between operations, Alice, Bob, and the persistence service would
     // exchange blocks via bitswap, car mirror or some other protocol.
     // Here we're simplifying by sharing a 'global' block store.
-    let store = &MemoryBlockStore::new();
+    let store = &InMemoryBlockstore::<64>::new();
 
     // Alice creates a private file system with some data.
     // She shares read access with bob by securely transferring the access_key.
@@ -54,7 +56,7 @@ async fn main() -> Result<()> {
 /// Alice creates a directory and gives access to it out to someone else.
 /// The returned AccessKey gives read access and the NameAccumulator is
 /// supposed to be publicly signed for verifyable write access.
-async fn alice_actions(store: &impl BlockStore) -> Result<(Cid, AccessKey, NameAccumulator)> {
+async fn alice_actions(store: &impl Blockstore) -> Result<(Cid, AccessKey, NameAccumulator)> {
     let rng = &mut ChaCha12Rng::from_entropy();
     let forest = &mut HamtForest::new_rsa_2048_rc(rng);
     let root_dir = &mut PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
@@ -71,7 +73,7 @@ async fn alice_actions(store: &impl BlockStore) -> Result<(Cid, AccessKey, NameA
 async fn bob_actions(
     old_forest_cid: Cid,
     root_dir_access: AccessKey,
-    store: &impl BlockStore,
+    store: &impl Blockstore,
 ) -> Result<(ForestProofs, Cid)> {
     let hamt_forest = HamtForest::load(&old_forest_cid, store).await?;
     let mut forest = ProvingHamtForest::new(Arc::new(hamt_forest));
@@ -109,7 +111,7 @@ async fn persistence_service_actions(
     new_forest_cid: Cid,
     proofs: ForestProofs,
     allowed_access: NameAccumulator,
-    store: &impl BlockStore,
+    store: &impl Blockstore,
 ) -> Result<()> {
     let old_forest = HamtForest::load(&old_forest_cid, store).await?;
     let new_forest = HamtForest::load(&new_forest_cid, store).await?;

@@ -4,8 +4,9 @@ use anyhow::Result;
 use serde::{de::DeserializeOwned, Serialize};
 use std::hash::Hash;
 use wnfs_common::{
+    blockstore::Blockstore,
     utils::{Arc, CondSync},
-    BlockStore, Link, Storable,
+    Link, Storable,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -17,7 +18,7 @@ pub async fn merge<K, V, H>(
     main_link: Link<Arc<Node<K, V, H>>>,
     other_link: Link<Arc<Node<K, V, H>>>,
     f: impl Fn(&V, &V) -> Result<V>,
-    store: &impl BlockStore,
+    store: &impl Blockstore,
 ) -> Result<Arc<Node<K, V, H>>>
 where
     K: Storable + Eq + Clone + CondSync + Hash + AsRef<[u8]>,
@@ -72,7 +73,7 @@ mod proptests {
     use proptest::prop_assert_eq;
     use std::cmp;
     use test_strategy::proptest;
-    use wnfs_common::{utils::Arc, Link, MemoryBlockStore};
+    use wnfs_common::{blockstore::InMemoryBlockstore, utils::Arc, Link};
 
     #[proptest(cases = 100)]
     fn merge_associativity(
@@ -81,7 +82,7 @@ mod proptests {
         #[strategy(generate_kvs("[a-z0-9]{1,3}", 0u64..1000, 0..100))] kvs3: Vec<(String, u64)>,
     ) {
         task::block_on(async {
-            let store = &MemoryBlockStore::default();
+            let store = &InMemoryBlockstore::<64>::new();
 
             let node1 = strategies::node_from_kvs(kvs1, store).await.unwrap();
             let node2 = strategies::node_from_kvs(kvs2, store).await.unwrap();
@@ -138,7 +139,7 @@ mod proptests {
         #[strategy(generate_kvs("[a-z0-9]{1,3}", 0u64..1000, 0..100))] kvs2: Vec<(String, u64)>,
     ) {
         task::block_on(async {
-            let store = &MemoryBlockStore::default();
+            let store = &InMemoryBlockstore::<64>::new();
 
             let node1 = strategies::node_from_kvs(kvs1, store).await.unwrap();
             let node2 = strategies::node_from_kvs(kvs2, store).await.unwrap();
@@ -172,7 +173,7 @@ mod proptests {
         #[strategy(generate_kvs("[a-z0-9]{1,3}", 0u64..1000, 0..100))] kvs2: Vec<(String, u64)>,
     ) {
         task::block_on(async {
-            let store = &MemoryBlockStore::default();
+            let store = &InMemoryBlockstore::<64>::new();
 
             let node1 = strategies::node_from_kvs(kvs1, store).await.unwrap();
             let node2 = strategies::node_from_kvs(kvs2, store).await.unwrap();

@@ -1,10 +1,13 @@
-use crate::{codecs::Codec, parse_links, protobufs};
+use crate::{codecs::Codec, protobufs};
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
-use libipld::Cid;
 use std::{io::Cursor, pin::Pin};
 use tokio::io::AsyncRead;
-use wnfs_common::BlockStore;
+use wnfs_common::{
+    blockstore::{block::Block as _, Blockstore},
+    ipld_core::cid::Cid,
+    Blake3Block,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
@@ -37,26 +40,11 @@ impl Block {
         }
     }
 
-    pub async fn store(&self, store: &impl BlockStore) -> Result<Cid> {
-        Ok(store
-            .put_block(self.data.clone(), self.codec.into())
-            .await?)
-    }
-
-    /// Validate the block. Will return an error if the links are wrong.
-    pub fn validate(&self) -> Result<()> {
-        // check that the links are complete
-        let expected_links = parse_links(self.codec, &self.data)?;
-        let mut actual_links = self.links.clone();
-        actual_links.sort();
-        // We need to deduplicate the actual links. An example case:
-        // A unixfs file which is 1GB of zeros.
-        // In that case, a node's links will contain multiple regions that hash to the same value,
-        // resulting in the same hash for whole ranges.
-        // But the parse_links function only accumulates a set of links.
-        actual_links.dedup();
-        anyhow::ensure!(expected_links == actual_links, "links do not match");
-        Ok(())
+    pub async fn store(&self, store: &impl Blockstore) -> Result<Cid> {
+        let block = Blake3Block::new(self.codec.into(), self.data.clone());
+        let cid = block.cid()?;
+        store.put(block).await?;
+        Ok(cid)
     }
 
     pub fn into_parts(self) -> (Codec, Bytes, Vec<Cid>) {

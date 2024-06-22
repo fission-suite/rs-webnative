@@ -8,9 +8,8 @@ use anyhow::Result;
 use async_stream::try_stream;
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
-use libipld::Cid;
 use std::collections::VecDeque;
-use wnfs_common::{utils::CondSend, BlockStore};
+use wnfs_common::{blockstore::Blockstore, ipld_core::cid::Cid, utils::CondSend};
 
 /// Default degree number for balanced tree, taken from unixfs specs
 /// <https://github.com/ipfs/specs/blob/main/UNIXFS.md#layout>
@@ -36,7 +35,7 @@ impl TreeBuilder {
     pub fn stream_tree<'a>(
         &self,
         chunks: impl Stream<Item = std::io::Result<Bytes>> + CondSend + 'a,
-        store: &'a impl BlockStore,
+        store: &'a impl Blockstore,
     ) -> impl Stream<Item = Result<(Cid, Block)>> + 'a {
         match self {
             TreeBuilder::Balanced { degree } => stream_balanced_tree(chunks, *degree, store),
@@ -53,7 +52,7 @@ struct LinkInfo {
 fn stream_balanced_tree<'a>(
     in_stream: impl Stream<Item = std::io::Result<Bytes>> + CondSend + 'a,
     degree: usize,
-    store: &'a impl BlockStore,
+    store: &'a impl Blockstore,
 ) -> impl Stream<Item = Result<(Cid, Block)>> + 'a {
     try_stream! {
         // degree = 8
@@ -234,7 +233,7 @@ impl TreeNode {
 mod tests {
     use super::*;
     use bytes::BytesMut;
-    use wnfs_common::MemoryBlockStore;
+    use wnfs_common::blockstore::InMemoryBlockstore;
 
     // chunks are just a single usize integer
     const CHUNK_SIZE: u64 = std::mem::size_of::<usize>() as u64;
@@ -244,7 +243,7 @@ mod tests {
     }
 
     async fn build_expect_tree(num_chunks: usize, degree: usize) -> Vec<Vec<(Cid, Block)>> {
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let chunks = test_chunk_stream(num_chunks);
         tokio::pin!(chunks);
         let mut tree = vec![vec![]];
@@ -338,7 +337,7 @@ mod tests {
         build_expect_vec_from_tree(tree, num_chunks, degree).await
     }
 
-    async fn make_leaf(data: usize, store: &impl BlockStore) -> (Cid, Block, LinkInfo) {
+    async fn make_leaf(data: usize, store: &impl Blockstore) -> (Cid, Block, LinkInfo) {
         let (block, link_info) = TreeNode::Leaf(BytesMut::from(&data.to_be_bytes()[..]).freeze())
             .encode()
             .unwrap();
@@ -348,7 +347,7 @@ mod tests {
 
     async fn make_stem(
         links: Vec<(Cid, LinkInfo)>,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> (Cid, Block, LinkInfo) {
         let (block, link_info) = TreeNode::Stem(links).encode().unwrap();
         let cid = block.store(store).await.unwrap();
@@ -357,7 +356,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_build_expect() {
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         // manually build tree made of 7 chunks (11 total nodes)
         let (leaf_0_cid, leaf_0, len_0) = make_leaf(0, store).await;
         let (leaf_1_cid, leaf_1, len_1) = make_leaf(1, store).await;
@@ -483,7 +482,7 @@ mod tests {
 
     #[tokio::test]
     async fn balanced_tree_test_leaf() {
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let num_chunks = 1;
         let expect = build_expect(num_chunks, 3).await;
         let got = stream_balanced_tree(test_chunk_stream(1), 3, store);
@@ -493,7 +492,7 @@ mod tests {
 
     #[tokio::test]
     async fn balanced_tree_test_height_one() {
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let num_chunks = 3;
         let degrees = 3;
         let expect = build_expect(num_chunks, degrees).await;
@@ -504,7 +503,7 @@ mod tests {
 
     #[tokio::test]
     async fn balanced_tree_test_height_two_full() {
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let degrees = 3;
         let num_chunks = 9;
         let expect = build_expect(num_chunks, degrees).await;
@@ -515,7 +514,7 @@ mod tests {
 
     #[tokio::test]
     async fn balanced_tree_test_height_two_not_full() {
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let degrees = 3;
         let num_chunks = 10;
         let expect = build_expect(num_chunks, degrees).await;
@@ -526,7 +525,7 @@ mod tests {
 
     #[tokio::test]
     async fn balanced_tree_test_height_three() {
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let num_chunks = 125;
         let degrees = 5;
         let expect = build_expect(num_chunks, degrees).await;
@@ -537,7 +536,7 @@ mod tests {
 
     #[tokio::test]
     async fn balanced_tree_test_large() {
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let num_chunks = 780;
         let degrees = 11;
         let expect = build_expect(num_chunks, degrees).await;

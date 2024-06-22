@@ -22,19 +22,22 @@ anyhow = "1.0"
 async-once-cell = "0.5"
 base64 = { version = "0.21", optional = true }
 base64-serde = { version = "0.7", optional = true }
+blake3 = "1.5.1"
+blockstore = "0.5"
 bytes = { version = "1.4", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-cid = "0.10"
-dashmap = "5.5.3"
+cid = "0.11"
 futures = "0.3"
-libipld = { version = "0.16", features = ["dag-cbor", "derive", "serde-codec"] }
+ipld-core = "0.4"
+ipld-dagpb = { version = "0.2", optional = true }
 multihash = "0.18"
 once_cell = "1.16"
 parking_lot = "0.12"
 proptest = { version = "1.1", optional = true }
 rand_core = "0.6"
 serde = { version = "1.0", features = ["rc"] }
-serde_ipld_dagcbor = "0.4.2"
+serde_ipld_dagcbor = "0.4"
+serde_ipld_dagjson = { version = "0.2", optional = true }
 serde_json = { version = "1.0", optional = true }
 thiserror = "1.0"
 
@@ -42,9 +45,19 @@ thiserror = "1.0"
 async-std = { version = "1.11", features = ["attributes"] }
 base64 = "0.21"
 base64-serde = "0.7"
+ipld-dagpb = "0.2"
 proptest = "1.1"
 rand = "0.8"
+serde_ipld_dagjson = "0.2"
 serde_json = "1.0"
+testresult = "0.4.0"
 
 [features]
-test_utils = ["dep:proptest", "dep:base64-serde", "dep:base64", "dep:serde_json"]
+test_utils = [
+  "dep:proptest",
+  "dep:base64-serde",
+  "dep:base64",
+  "dep:serde_json",
+  "dep:serde_ipld_dagjson",
+  "dep:ipld-dagpb"
+]

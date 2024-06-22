@@ -27,7 +27,6 @@ chrono = { version = "0.4.23", default-features = false, features = ["clock", "s
 either = "1.8"
 futures = "0.3"
 insta = { version = "1.30", features = ["json"] }
-libipld = { version = "0.16", features = ["dag-cbor", "derive", "serde-codec"] }
 log = { version = "0.4", optional = true }
 multihash = "0.18"
 once_cell = "1.16"

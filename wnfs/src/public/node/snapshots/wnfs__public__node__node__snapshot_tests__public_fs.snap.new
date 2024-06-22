@@ -1,0 +1,134 @@
+---
+source: wnfs/src/public/node/node.rs
+assertion_line: 710
+expression: values
+---
+[
+  {
+    "cid": "bafyr4igcgvnnbd6xh7waotpqdopqcesi4wfmfcl2u42gyspjfc3djzt6wa",
+    "value": {
+      "wnfs/pub/dir": {
+        "metadata": {
+          "created": 0,
+          "modified": 0
+        },
+        "previous": [
+          {
+            "/": "bafyr4ih3k2ipwwqryrlmtmwtolma4t772gknmx7pxqu5opjwsrr2nc27qq"
+          }
+        ],
+        "userland": {
+          "music": {
+            "/": "bafyr4ieu4jffr7sjcakgzk6jr4w5gbbmjs6oe7q2trrutjqcugr4orvmuu"
+          },
+          "text.txt": {
+            "/": "bafyr4ihsg6l6g5tw45a3zh2dilphrtafnb6pyc7dpdxbuncgekjycqchnu"
+          },
+          "videos": {
+            "/": "bafyr4ifobgzwli26fibfladmtouh32okhnmhc7jpy5dvmocz5dgg3wqrnq"
+          }
+        },
+        "version": "1.0.0"
+      }
+    },
+    "bytes": "oWx3bmZzL3B1Yi9kaXKkZ3ZlcnNpb25lMS4wLjBobWV0YWRhdGGiZ2NyZWF0ZWQAaG1vZGlmaWVkAGhwcmV2aW91c4HYKlglAAFxHiD7VpD7WhHEVsmy03LYDk//0ZTWX++8Kdc9NpRjpotfhGh1c2VybGFuZKNlbXVzaWPYKlglAAFxHiCU4kpY/kkQFGyryY8t0wQsTLzifhqcY0mmAqGjx0aspWZ2aWRlb3PYKlglAAFxHiCuCbNlo14qAlWAbJuofenKO1hxfS/HR1Y4WejMbdoRbGh0ZXh0LnR4dNgqWCUAAXEeIPI3l+N2dudBvJ9DQt54zAVofPwL43juGjRGIpOBQEdt"
+  },
+  {
+    "cid": "bafyr4ih3k2ipwwqryrlmtmwtolma4t772gknmx7pxqu5opjwsrr2nc27qq",
+    "value": {
+      "wnfs/pub/dir": {
+        "metadata": {
+          "created": 0,
+          "modified": 0
+        },
+        "previous": [],
+        "userland": {},
+        "version": "1.0.0"
+      }
+    },
+    "bytes": "oWx3bmZzL3B1Yi9kaXKkZ3ZlcnNpb25lMS4wLjBobWV0YWRhdGGiZ2NyZWF0ZWQAaG1vZGlmaWVkAGhwcmV2aW91c4BodXNlcmxhbmSg"
+  },
+  {
+    "cid": "bafyr4ieu4jffr7sjcakgzk6jr4w5gbbmjs6oe7q2trrutjqcugr4orvmuu",
+    "value": {
+      "wnfs/pub/dir": {
+        "metadata": {
+          "created": 0,
+          "modified": 0
+        },
+        "previous": [],
+        "userland": {
+          "jazz": {
+            "/": "bafyr4ihsg6l6g5tw45a3zh2dilphrtafnb6pyc7dpdxbuncgekjycqchnu"
+          }
+        },
+        "version": "1.0.0"
+      }
+    },
+    "bytes": "oWx3bmZzL3B1Yi9kaXKkZ3ZlcnNpb25lMS4wLjBobWV0YWRhdGGiZ2NyZWF0ZWQAaG1vZGlmaWVkAGhwcmV2aW91c4BodXNlcmxhbmShZGphenrYKlglAAFxHiDyN5fjdnbnQbyfQ0LeeMwFaHz8C+N47ho0RiKTgUBHbQ=="
+  },
+  {
+    "cid": "bafyr4ihsg6l6g5tw45a3zh2dilphrtafnb6pyc7dpdxbuncgekjycqchnu",
+    "value": {
+      "wnfs/pub/file": {
+        "metadata": {
+          "created": 0,
+          "modified": 0
+        },
+        "previous": [],
+        "userland": {
+          "/": "bafkr4ibirkdkphzauplnztoko4j35lwrpb4yffv57j4rh6rkmlmxe67y7a"
+        },
+        "version": "1.0.0"
+      }
+    },
+    "bytes": "oW13bmZzL3B1Yi9maWxlpGd2ZXJzaW9uZTEuMC4waG1ldGFkYXRhomdjcmVhdGVkAGhtb2RpZmllZABocHJldmlvdXOAaHVzZXJsYW5k2CpYJQABVR4gKIqGp58go9bczcp3E76u0Xh5gpa9+nkT+ipi2XJ7+Pg="
+  },
+  {
+    "cid": "bafyr4ifobgzwli26fibfladmtouh32okhnmhc7jpy5dvmocz5dgg3wqrnq",
+    "value": {
+      "wnfs/pub/dir": {
+        "metadata": {
+          "created": 0,
+          "modified": 0
+        },
+        "previous": [],
+        "userland": {
+          "movies": {
+            "/": "bafyr4icjyr6bcipvqzguj3gctaihetpeqxgine3zw7zkw4eyzrn2ojxwhe"
+          }
+        },
+        "version": "1.0.0"
+      }
+    },
+    "bytes": "oWx3bmZzL3B1Yi9kaXKkZ3ZlcnNpb25lMS4wLjBobWV0YWRhdGGiZ2NyZWF0ZWQAaG1vZGlmaWVkAGhwcmV2aW91c4BodXNlcmxhbmShZm1vdmllc9gqWCUAAXEeIEnEfBEh9YZNROzCmBByTeSFzIaTebfyq3CYzFunJvY5"
+  },
+  {
+    "cid": "bafkr4ibirkdkphzauplnztoko4j35lwrpb4yffv57j4rh6rkmlmxe67y7a",
+    "value": {
+      "/": {
+        "bytes": "SGVsbG8sIFdvcmxkIQ"
+      }
+    },
+    "bytes": "SGVsbG8sIFdvcmxkIQ=="
+  },
+  {
+    "cid": "bafyr4icjyr6bcipvqzguj3gctaihetpeqxgine3zw7zkw4eyzrn2ojxwhe",
+    "value": {
+      "wnfs/pub/dir": {
+        "metadata": {
+          "created": 0,
+          "modified": 0
+        },
+        "previous": [],
+        "userland": {
+          "anime": {
+            "/": "bafyr4ihsg6l6g5tw45a3zh2dilphrtafnb6pyc7dpdxbuncgekjycqchnu"
+          }
+        },
+        "version": "1.0.0"
+      }
+    },
+    "bytes": "oWx3bmZzL3B1Yi9kaXKkZ3ZlcnNpb25lMS4wLjBobWV0YWRhdGGiZ2NyZWF0ZWQAaG1vZGlmaWVkAGhwcmV2aW91c4BodXNlcmxhbmShZWFuaW1l2CpYJQABcR4g8jeX43Z250G8n0NC3njMBWh8/AvjeO4aNEYik4FAR20="
+  }
+]

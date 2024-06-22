@@ -9,13 +9,12 @@ use crate::{
     traits::Big,
 };
 use anyhow::Result;
-use libipld::Cid;
 use num_traits::{One, Zero};
 use once_cell::sync::OnceCell;
 use rand_core::CryptoRngCore;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{hash::Hash, str::FromStr};
-use wnfs_common::{BlockStore, Storable};
+use wnfs_common::Storable;
 
 /// The domain separation string for deriving the l hash in the PoKE* protocol.
 const L_HASH_DSI: &str = "wnfs/1.0/PoKE*/l 128-bit hash derivation";
@@ -448,13 +447,13 @@ macro_rules! impl_storable {
 
             async fn to_serializable(
                 &self,
-                _store: &impl BlockStore,
+                _store: &impl ::wnfs_common::blockstore::Blockstore,
             ) -> Result<Self::Serializable> {
                 Ok(self.clone())
             }
 
             async fn from_serializable(
-                _: Option<&Cid>,
+                _: Option<&::wnfs_common::ipld_core::cid::Cid>,
                 serializable: Self::Serializable,
             ) -> Result<Self> {
                 Ok(serializable)
@@ -640,15 +639,14 @@ mod tests {
     use rand_chacha::ChaCha12Rng;
     use std::io::Cursor;
     use test_strategy::proptest;
-    use wnfs_common::{decode, encode};
 
     #[test]
     fn name_segment_serialize_roundtrip() {
         let rng = &mut thread_rng();
         let segment = NameSegment::new(rng);
 
-        let bytes = encode(&segment, DagCborCodec).unwrap();
-        let segment_back: NameSegment = decode(&bytes, DagCborCodec).unwrap();
+        let bytes = serde_ipld_dagcbor::to_vec(&segment).unwrap();
+        let segment_back: NameSegment = serde_ipld_dagcbor::from_slice(&bytes).unwrap();
 
         assert_eq!(segment_back, segment);
     }
@@ -818,6 +816,7 @@ mod tests {
 #[cfg(test)]
 mod snapshot_tests {
     use super::*;
+    #[allow(unused_imports)]
     use crate::BigNumDig;
     use rand_chacha::ChaCha12Rng;
     use rand_core::SeedableRng;

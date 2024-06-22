@@ -2,8 +2,7 @@
 
 use anyhow::{bail, Result};
 use chrono::{DateTime, TimeZone, Utc};
-use libipld::{Ipld, Multihash};
-use multihash::{Code, MultihashDigest};
+use ipld_core::ipld::Ipld;
 use serde::{
     de::{DeserializeOwned, Error as DeError},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -153,7 +152,7 @@ impl Metadata {
     /// ```
     /// use wnfs_common::Metadata;
     /// use chrono::Utc;
-    /// use libipld::Ipld;
+    /// use ipld_core::ipld::Ipld;
     ///
     /// let mut metadata = Metadata::new(Utc::now());
     /// metadata.put("foo", Ipld::String("bar".into()));
@@ -174,14 +173,14 @@ impl Metadata {
 
     /// Serializes and inserts given value at given key in metadata.
     pub fn put_serializable(&mut self, key: &str, value: impl Serialize) -> Result<Option<Ipld>> {
-        let serialized = libipld::serde::to_ipld(value)?;
+        let serialized = ipld_core::serde::to_ipld(value)?;
         Ok(self.put(key, serialized))
     }
 
     /// Returns deserialized metadata value behind given key.
     pub fn get_deserializable<D: DeserializeOwned>(&self, key: &str) -> Option<Result<D>> {
         self.get(key)
-            .map(|ipld| Ok(libipld::serde::from_ipld(ipld.clone())?))
+            .map(|ipld| Ok(ipld_core::serde::from_ipld(ipld.clone())?))
     }
 
     /// Deletes a key from the metadata.
@@ -190,7 +189,7 @@ impl Metadata {
     /// ```
     /// use wnfs_common::Metadata;
     /// use chrono::Utc;
-    /// use libipld::Ipld;
+    /// use ipld_core::ipld::Ipld;
     ///
     /// let mut metadata = Metadata::new(Utc::now());
     /// metadata.put("foo", Ipld::String("bar".into()));
@@ -210,7 +209,7 @@ impl Metadata {
     /// ```
     /// use wnfs_common::Metadata;
     /// use chrono::Utc;
-    /// use libipld::Ipld;
+    /// use ipld_core::ipld::Ipld;
     ///
     /// let mut metadata1 = Metadata::new(Utc::now());
     /// metadata1.put("foo", Ipld::String("bar".into()));
@@ -225,10 +224,9 @@ impl Metadata {
         }
     }
 
-    pub(crate) fn hash(&self) -> Result<Multihash> {
+    pub(crate) fn hash(&self) -> Result<blake3::Hash> {
         let vec = serde_ipld_dagcbor::to_vec(self)?;
-        let hash = Code::Blake3_256.digest(&vec);
-        Ok(hash)
+        Ok(blake3::hash(&vec))
     }
 
     /// Tie break this node with another one.
@@ -236,7 +234,7 @@ impl Metadata {
     /// together (yet), instead we compare their hashes. The one with the lower hash
     /// survives.
     pub fn tie_break_with(&mut self, other: &Self) -> Result<()> {
-        if self.hash()?.digest() > other.hash()?.digest() {
+        if self.hash()?.as_bytes() > other.hash()?.as_bytes() {
             self.0 = other.0.clone();
         }
 
@@ -308,17 +306,19 @@ impl<'de> Deserialize<'de> for NodeType {
 
 #[cfg(test)]
 mod tests {
-    use crate::{decode, encode, Metadata};
+    use crate::Metadata;
     use chrono::Utc;
-    use libipld::cbor::DagCborCodec;
+    use testresult::TestResult;
 
     #[async_std::test]
-    async fn metadata_can_encode_decode_as_cbor() {
+    async fn metadata_can_encode_decode_as_cbor() -> TestResult {
         let metadata = Metadata::new(Utc::now());
 
-        let encoded_metadata = encode(&metadata, DagCborCodec).unwrap();
-        let decoded_metadata: Metadata = decode(encoded_metadata.as_ref(), DagCborCodec).unwrap();
+        let encoded_metadata = serde_ipld_dagcbor::to_vec(&metadata)?;
+        let decoded_metadata: Metadata = serde_ipld_dagcbor::from_slice(&encoded_metadata)?;
 
         assert_eq!(metadata, decoded_metadata);
+
+        Ok(())
     }
 }

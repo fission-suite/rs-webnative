@@ -1,16 +1,17 @@
 use super::traits::PrivateForest;
 use crate::error::FsError;
 use anyhow::Result;
-use libipld_core::cid::Cid;
 use quick_cache::sync::Cache;
 use rand_core::CryptoRngCore;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use wnfs_common::{
+    blockstore::Blockstore,
     impl_storable_from_serde,
+    ipld_core::cid::Cid,
     utils::{Arc, CondSend},
-    BlockStore, HashOutput, Link, Storable,
+    HashOutput, Link, Storable,
 };
 use wnfs_hamt::{
     constants::HAMT_VERSION, merge, serializable::NodeSerializable, Hamt, Hasher, KeyValueChange,
@@ -129,7 +130,7 @@ impl HamtForest {
     pub async fn diff(
         &self,
         other: &Self,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Vec<KeyValueChange<NameAccumulator, Ciphertexts>>> {
         if self.accumulator != other.accumulator {
             return Err(FsError::IncompatibleAccumulatorSetups.into());
@@ -160,7 +161,7 @@ impl HamtForest {
     ///
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
-    ///     let store = &mut MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let rng = &mut ChaCha12Rng::from_entropy();
     ///
     ///     let forest = &mut HamtForest::new_rsa_2048_rc(rng);
@@ -203,7 +204,7 @@ impl HamtForest {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn merge(&self, other: &Self, store: &impl BlockStore) -> Result<Self> {
+    pub async fn merge(&self, other: &Self, store: &impl Blockstore) -> Result<Self> {
         if self.accumulator != other.accumulator {
             return Err(FsError::IncompatibleAccumulatorSetups.into());
         }
@@ -250,7 +251,7 @@ impl PrivateForest for HamtForest {
         }
     }
 
-    async fn has_by_hash(&self, name_hash: &HashOutput, store: &impl BlockStore) -> Result<bool> {
+    async fn has_by_hash(&self, name_hash: &HashOutput, store: &impl Blockstore) -> Result<bool> {
         Ok(self
             .hamt
             .root
@@ -259,7 +260,7 @@ impl PrivateForest for HamtForest {
             .is_some())
     }
 
-    async fn has(&self, name: &Name, store: &impl BlockStore) -> Result<bool> {
+    async fn has(&self, name: &Name, store: &impl Blockstore) -> Result<bool> {
         self.has_by_hash(
             &blake3::Hasher::hash(&self.get_accumulated_name(name)),
             store,
@@ -271,7 +272,7 @@ impl PrivateForest for HamtForest {
         &mut self,
         name: &Name,
         values: I,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<NameAccumulator>
     where
         I: IntoIterator<Item = Cid> + CondSend,
@@ -296,7 +297,7 @@ impl PrivateForest for HamtForest {
     async fn get_encrypted_by_hash<'b>(
         &'b self,
         name_hash: &HashOutput,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<&'b BTreeSet<Cid>>> {
         Ok(self
             .hamt
@@ -309,7 +310,7 @@ impl PrivateForest for HamtForest {
     async fn get_encrypted(
         &self,
         name: &Name,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<&BTreeSet<Cid>>> {
         let name_hash = &blake3::Hasher::hash(&self.get_accumulated_name(name));
         self.get_encrypted_by_hash(name_hash, store).await
@@ -318,7 +319,7 @@ impl PrivateForest for HamtForest {
     async fn remove_encrypted(
         &mut self,
         name: &Name,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<Pair<NameAccumulator, BTreeSet<Cid>>>> {
         let name_hash = &blake3::Hasher::hash(&self.get_accumulated_name(name));
         Ok(self
@@ -346,11 +347,11 @@ impl PrivateForest for Arc<HamtForest> {
         (**self).get_proven_name(name)
     }
 
-    async fn has_by_hash(&self, name_hash: &HashOutput, store: &impl BlockStore) -> Result<bool> {
+    async fn has_by_hash(&self, name_hash: &HashOutput, store: &impl Blockstore) -> Result<bool> {
         (**self).has_by_hash(name_hash, store).await
     }
 
-    async fn has(&self, name: &Name, store: &impl BlockStore) -> Result<bool> {
+    async fn has(&self, name: &Name, store: &impl Blockstore) -> Result<bool> {
         (**self).has(name, store).await
     }
 
@@ -358,7 +359,7 @@ impl PrivateForest for Arc<HamtForest> {
         &mut self,
         name: &Name,
         values: I,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<NameAccumulator>
     where
         I: IntoIterator<Item = Cid> + CondSend,
@@ -370,7 +371,7 @@ impl PrivateForest for Arc<HamtForest> {
     async fn get_encrypted_by_hash<'b>(
         &'b self,
         name_hash: &HashOutput,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<&'b BTreeSet<Cid>>> {
         (**self).get_encrypted_by_hash(name_hash, store).await
     }
@@ -378,7 +379,7 @@ impl PrivateForest for Arc<HamtForest> {
     async fn get_encrypted(
         &self,
         name: &Name,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<&BTreeSet<Cid>>> {
         (**self).get_encrypted(name, store).await
     }
@@ -386,7 +387,7 @@ impl PrivateForest for Arc<HamtForest> {
     async fn remove_encrypted(
         &mut self,
         name: &Name,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<Pair<NameAccumulator, BTreeSet<Cid>>>> {
         Arc::make_mut(self).remove_encrypted(name, store).await
     }
@@ -395,7 +396,7 @@ impl PrivateForest for Arc<HamtForest> {
 impl Storable for HamtForest {
     type Serializable = HamtForestSerializable;
 
-    async fn to_serializable(&self, store: &impl BlockStore) -> Result<Self::Serializable> {
+    async fn to_serializable(&self, store: &impl Blockstore) -> Result<Self::Serializable> {
         Ok(HamtForestSerializable {
             root: self.hamt.root.to_serializable(store).await?,
             version: HAMT_VERSION,
@@ -430,12 +431,12 @@ mod tests {
     use chrono::Utc;
     use rand_chacha::ChaCha12Rng;
     use rand_core::SeedableRng;
-    use wnfs_common::MemoryBlockStore;
+    use wnfs_common::blockstore::InMemoryBlockstore;
     use wnfs_nameaccumulator::NameSegment;
 
     #[async_std::test]
     async fn test_put_get() {
-        let store = &mut MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
 
@@ -456,7 +457,7 @@ mod tests {
 
     #[async_std::test]
     async fn inserted_items_can_be_fetched() {
-        let store = &mut MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let dir = PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
@@ -472,7 +473,7 @@ mod tests {
 
     #[async_std::test]
     async fn multivalue_conflict_can_be_fetched_individually() {
-        let store = &mut MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let dir = PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);

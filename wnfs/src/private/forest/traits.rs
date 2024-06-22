@@ -5,11 +5,12 @@ use crate::{
 use anyhow::Result;
 use async_stream::stream;
 use futures::Future;
-use libipld_core::cid::Cid;
 use std::collections::BTreeSet;
 use wnfs_common::{
+    blockstore::Blockstore,
+    ipld_core::cid::Cid,
     utils::{BoxStream, CondSend, CondSync},
-    BlockStore, HashOutput,
+    HashOutput,
 };
 use wnfs_hamt::Pair;
 use wnfs_nameaccumulator::{AccumulatorSetup, ElementsProof, Name, NameAccumulator};
@@ -87,14 +88,14 @@ pub trait PrivateForest: CondSync {
     fn has_by_hash(
         &self,
         name_hash: &HashOutput,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> impl Future<Output = Result<bool>> + CondSend;
 
     /// Check whether a certain name has any values.
     fn has(
         &self,
         name: &Name,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> impl Future<Output = Result<bool>> + CondSend;
 
     /// Adds new encrypted values at the given key.
@@ -102,7 +103,7 @@ pub trait PrivateForest: CondSync {
         &mut self,
         name: &Name,
         values: I,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> impl Future<Output = Result<NameAccumulator>> + CondSend
     where
         I: IntoIterator<Item = Cid> + CondSend,
@@ -112,21 +113,21 @@ pub trait PrivateForest: CondSync {
     fn get_encrypted_by_hash<'b>(
         &'b self,
         name_hash: &HashOutput,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> impl Future<Output = Result<Option<&'b BTreeSet<Cid>>>> + CondSend;
 
     /// Gets the CIDs to blocks of ciphertext by name.
     fn get_encrypted(
         &self,
         name: &Name,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> impl Future<Output = Result<Option<&BTreeSet<Cid>>>> + CondSend;
 
     /// Removes the CIDs to blocks of ciphertext by name.
     fn remove_encrypted(
         &mut self,
         name: &Name,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> impl Future<Output = Result<Option<Pair<NameAccumulator, BTreeSet<Cid>>>>> + CondSend;
 
     /// Returns a stream of all private nodes that could be decrypted at given revision.
@@ -138,7 +139,7 @@ pub trait PrivateForest: CondSync {
         &'a self,
         label: &'a HashOutput,
         temporal_key: &'a TemporalKey,
-        store: &'a impl BlockStore,
+        store: &'a impl Blockstore,
         parent_name: Option<Name>,
     ) -> BoxStream<'a, Result<(Cid, PrivateNode)>>
     where

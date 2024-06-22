@@ -7,11 +7,10 @@ use crate::{
 use anyhow::{anyhow, ensure, Result};
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
-use libipld::Cid;
 use prost::Message;
 use std::fmt::Debug;
 use tokio::io::AsyncRead;
-use wnfs_common::{utils::CondSend, BlockStore};
+use wnfs_common::{blockstore::Blockstore, ipld_core::cid::Cid, utils::CondSend};
 
 /// Representation of a constructed File.
 pub struct File<'a> {
@@ -36,13 +35,13 @@ impl<'a> Debug for File<'a> {
 impl<'a> File<'a> {
     pub fn encode(
         self,
-        store: &'a impl BlockStore,
+        store: &'a impl Blockstore,
     ) -> Result<impl Stream<Item = Result<(Cid, Block)>> + '_> {
         let chunks = self.chunker.chunks(self.content);
         Ok(self.tree_builder.stream_tree(chunks, store))
     }
 
-    pub async fn store(self, store: &impl BlockStore) -> Result<Cid> {
+    pub async fn store(self, store: &impl Blockstore) -> Result<Cid> {
         let blocks = self.encode(store)?;
         tokio::pin!(blocks);
 
@@ -173,11 +172,11 @@ pub struct Config {
 mod tests {
     use super::*;
     use crate::chunker::DEFAULT_CHUNKS_SIZE;
-    use wnfs_common::MemoryBlockStore;
+    use wnfs_common::blockstore::InMemoryBlockstore;
 
     #[tokio::test]
     async fn test_builder_stream_small() -> Result<()> {
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         // Add a file
         let bar_encoded: Vec<_> = {
             let bar_reader = std::io::Cursor::new(b"bar");
@@ -192,7 +191,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_builder_stream_large() -> Result<()> {
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         // Add a file
         let bar_encoded: Vec<_> = {
             let bar_reader = std::io::Cursor::new(vec![1u8; 1024 * 1024]);
@@ -256,7 +255,7 @@ mod proptests {
     use test_strategy::proptest;
     use testresult::TestResult;
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
-    use wnfs_common::{MemoryBlockStore, MAX_BLOCK_SIZE};
+    use wnfs_common::{blockstore::InMemoryBlockstore, MAX_BLOCK_SIZE};
 
     fn arb_chunker() -> impl Strategy<Value = ChunkerConfig> {
         option::of(1_000..MAX_BLOCK_SIZE).prop_map(|opt| match opt {
@@ -272,7 +271,7 @@ mod proptests {
         #[strategy(0usize..5_000_000)] len: usize,
         #[strategy(arb_chunker())] chunker: ChunkerConfig,
     ) {
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let rng = &mut ChaCha12Rng::seed_from_u64(seed);
         let mut data = vec![0; len];
         rng.fill_bytes(&mut data);
@@ -286,7 +285,7 @@ mod proptests {
                 .store(store)
                 .await?;
 
-            let file = UnixFsFile::load(&root_cid, store).await?;
+            let file = UnixFsFile::load(root_cid, store).await?;
             assert_eq!(file.filesize(), Some(len as u64));
 
             let mut buffer = Vec::new();
@@ -309,7 +308,7 @@ mod proptests {
         #[strategy(0usize..1_000)] seek_len: usize,
         #[strategy(arb_chunker())] chunker: ChunkerConfig,
     ) {
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let rng = &mut ChaCha12Rng::seed_from_u64(seed);
         let mut data = vec![0; len];
         rng.fill_bytes(&mut data);
@@ -326,7 +325,7 @@ mod proptests {
                 .store(store)
                 .await?;
 
-            let file = UnixFsFile::load(&root_cid, store).await?;
+            let file = UnixFsFile::load(root_cid, store).await?;
             assert_eq!(file.filesize(), Some(len as u64));
 
             let mut buffer = vec![0; seek_len];

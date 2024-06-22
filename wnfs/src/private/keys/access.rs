@@ -3,9 +3,8 @@ use crate::{
     private::{PrivateRef, SnapshotKey, TemporalKey},
 };
 use anyhow::{bail, Result};
-use libipld_core::cid::Cid;
 use serde::{Deserialize, Serialize};
-use wnfs_common::HashOutput;
+use wnfs_common::{ipld_core::cid::Cid, HashOutput};
 
 //--------------------------------------------------------------------------------------------------
 // Type Definitions
@@ -124,7 +123,7 @@ mod snapshot_tests {
     use rand_chacha::ChaCha12Rng;
     use rand_core::SeedableRng;
     use testresult::TestResult;
-    use wnfs_common::{encode, libipld::json::DagJsonCodec};
+    use wnfs_common::ipld_core::serde;
 
     #[async_std::test]
     async fn test_access_key() -> TestResult {
@@ -146,7 +145,7 @@ mod snapshot_tests {
     }
 
     fn as_dag_json_value(s: impl Serialize) -> Result<serde_json::Value> {
-        let dag_json = encode(&libipld_core::serde::to_ipld(s)?, DagJsonCodec)?;
+        let dag_json = serde_ipld_dagjson::to_vec(&serde::to_ipld(s)?)?;
         let value = serde_json::from_slice(&dag_json)?;
         Ok(value)
     }

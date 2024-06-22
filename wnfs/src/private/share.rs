@@ -24,7 +24,10 @@ pub mod sharer {
     use anyhow::Result;
     use async_stream::try_stream;
     use futures::{Stream, TryStreamExt};
-    use wnfs_common::{BlockStore, CODEC_RAW};
+    use wnfs_common::{
+        blockstore::{block::Block as _, Blockstore},
+        Blake3Block, CODEC_RAW,
+    };
     use wnfs_nameaccumulator::{Name, NameSegment};
 
     /// Encrypts and shares a access key with multiple recipients using their
@@ -36,7 +39,7 @@ pub mod sharer {
         sharer_root_did: &str,
         recipient_exchange_root: PublicLink,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<()> {
         let mut exchange_keys = fetch_exchange_keys(recipient_exchange_root, store).await;
         let encoded_key = &serde_ipld_dagcbor::to_vec(access_key)?;
@@ -47,7 +50,9 @@ pub mod sharer {
             let share_label =
                 create_share_name(share_count, sharer_root_did, &public_key_modulus, forest);
 
-            let access_key_cid = store.put_block(encrypted_key, CODEC_RAW).await?;
+            let block = Blake3Block::new(CODEC_RAW, encrypted_key);
+            let access_key_cid = block.cid()?;
+            store.put(block).await?;
 
             forest
                 .put_encrypted(&share_label, Some(access_key_cid), store)
@@ -62,7 +67,7 @@ pub mod sharer {
     /// yield the exchange key's value.
     pub async fn fetch_exchange_keys(
         recipient_exchange_root: PublicLink,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> impl Stream<Item = Result<PublicKeyModulus>> + '_ {
         Box::pin(try_stream! {
             let root_dir = recipient_exchange_root
@@ -106,7 +111,7 @@ pub mod recipient {
         private::{forest::traits::PrivateForest, AccessKey, PrivateKey, PrivateNode},
     };
     use anyhow::Result;
-    use wnfs_common::BlockStore;
+    use wnfs_common::{blockstore::Blockstore, BlockStoreError};
     use wnfs_hamt::Hasher;
     use wnfs_nameaccumulator::Name;
 
@@ -117,7 +122,7 @@ pub mod recipient {
         recipient_exchange_key: &[u8],
         sharer_root_did: &str,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Option<u64>> {
         for share_count in share_count_start..share_count_start + limit {
             let share_label = sharer::create_share_name(
@@ -149,7 +154,7 @@ pub mod recipient {
         share_label: &Name,
         recipient_key: &impl PrivateKey,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<PrivateNode> {
         // Get cid to encrypted payload from sharer's forest using share_label
         let access_key_cid = forest
@@ -163,7 +168,10 @@ pub mod recipient {
             .ok_or(ShareError::AccessKeyNotFound)?;
 
         // Get encrypted access key from store using cid
-        let encrypted_access_key = store.get_block(access_key_cid).await?.to_vec();
+        let encrypted_access_key = store
+            .get(access_key_cid)
+            .await?
+            .ok_or_else(|| BlockStoreError::CIDNotFound(*access_key_cid))?;
 
         // Decrypt access key using recipient's private key and decode it.
         let access_key: AccessKey =
@@ -194,7 +202,7 @@ mod tests {
     use chrono::Utc;
     use rand_chacha::ChaCha12Rng;
     use rand_core::SeedableRng;
-    use wnfs_common::{utils::Arc, MemoryBlockStore};
+    use wnfs_common::{blockstore::InMemoryBlockstore, utils::Arc};
 
     mod helper {
         use crate::{
@@ -208,13 +216,13 @@ mod tests {
         use chrono::Utc;
         use rand_core::CryptoRngCore;
         use wnfs_common::{
+            blockstore::Blockstore,
             utils::{Arc, CondSend},
-            BlockStore,
         };
 
         pub(super) async fn create_sharer_dir(
             forest: &mut impl PrivateForest,
-            store: &impl BlockStore,
+            store: &impl Blockstore,
             rng: &mut (impl CryptoRngCore + CondSend),
         ) -> Result<Arc<PrivateDirectory>> {
             let mut dir = PrivateDirectory::new_and_store(
@@ -241,7 +249,7 @@ mod tests {
         }
 
         pub(super) async fn create_recipient_exchange_root(
-            store: &impl BlockStore,
+            store: &impl Blockstore,
         ) -> Result<(RsaPrivateKey, Arc<PublicDirectory>)> {
             let key = RsaPrivateKey::new()?;
             let exchange_key = key.get_public_key().get_public_key_modulus()?;
@@ -263,7 +271,7 @@ mod tests {
     #[async_std::test]
     async fn can_share_and_recieve_share() {
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
 
         let sharer_root_did = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
@@ -317,7 +325,7 @@ mod tests {
     #[async_std::test]
     async fn serialized_share_payload_can_be_deserialized() {
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
         let dir =
             PrivateDirectory::new_and_store(&forest.empty_name(), Utc::now(), forest, store, rng)
@@ -339,7 +347,7 @@ mod tests {
     #[async_std::test]
     async fn find_latest_share_counter_finds_highest_count() {
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
 
         let sharer_root_did = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";

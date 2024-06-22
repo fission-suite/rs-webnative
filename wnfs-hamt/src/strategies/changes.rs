@@ -6,8 +6,9 @@ use proptest::{collection::vec, strategy::Strategy};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{collections::HashMap, fmt::Debug};
 use wnfs_common::{
+    blockstore::Blockstore,
     utils::{Arc, CondSync},
-    BlockStore, Storable,
+    Storable,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -58,7 +59,7 @@ pub(crate) fn generate_ops_and_changes(
 pub(crate) async fn apply_changes<K: CondSync, V: CondSync>(
     node: &mut Arc<Node<K, V>>,
     changes: &Vec<Change<K, V>>,
-    store: &impl BlockStore,
+    store: &impl Blockstore,
 ) -> Result<()>
 where
     K: Storable + Debug + Clone + AsRef<[u8]>,
@@ -86,7 +87,7 @@ where
 pub(crate) async fn prepare_node<K: CondSync, V: CondSync>(
     node: &mut Arc<Node<K, V>>,
     changes: &Vec<Change<K, V>>,
-    store: &impl BlockStore,
+    store: &impl Blockstore,
 ) -> Result<()>
 where
     K: Storable + Debug + Clone + AsRef<[u8]>,

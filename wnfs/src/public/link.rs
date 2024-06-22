@@ -2,8 +2,7 @@
 
 use super::{PublicDirectory, PublicFile, PublicNode};
 use anyhow::Result;
-use libipld_core::cid::Cid;
-use wnfs_common::{utils::Arc, BlockStore, Link};
+use wnfs_common::{blockstore::Blockstore, ipld_core::cid::Cid, utils::Arc, Link};
 
 //--------------------------------------------------------------------------------------------------
 // Type Definitions
@@ -52,31 +51,31 @@ impl PublicLink {
 
     /// Gets the Cid stored in type. It attempts to get it from the store if it is not present in type.
     #[inline]
-    pub async fn resolve_cid(&self, store: &impl BlockStore) -> Result<Cid> {
+    pub async fn resolve_cid(&self, store: &impl Blockstore) -> Result<Cid> {
         self.0.resolve_cid(store).await
     }
 
     /// Gets the value stored in link. It attempts to get it from the store if it is not present in link.
     #[inline]
-    pub async fn resolve_value(&self, store: &impl BlockStore) -> Result<&PublicNode> {
+    pub async fn resolve_value(&self, store: &impl Blockstore) -> Result<&PublicNode> {
         self.0.resolve_value(store).await
     }
 
     /// Gets mut value stored in link. It attempts to get it from the store if it is not present in link.
     #[inline]
-    pub async fn resolve_value_mut(&mut self, store: &impl BlockStore) -> Result<&mut PublicNode> {
+    pub async fn resolve_value_mut(&mut self, store: &impl Blockstore) -> Result<&mut PublicNode> {
         self.0.resolve_value_mut(store).await
     }
 
     /// Gets an owned value from type. It attempts to it get from the store if it is not present in type.
     #[inline]
-    pub async fn resolve_owned_value(self, store: &impl BlockStore) -> Result<PublicNode> {
+    pub async fn resolve_owned_value(self, store: &impl Blockstore) -> Result<PublicNode> {
         self.0.resolve_owned_value(store).await
     }
 
     /// Compares two links for equality. Attempts to get them from store if they are not already cached.
     #[inline]
-    pub async fn deep_eq(&self, other: &Self, store: &impl BlockStore) -> Result<bool> {
+    pub async fn deep_eq(&self, other: &Self, store: &impl Blockstore) -> Result<bool> {
         self.0.deep_eq(&other.0, store).await
     }
 }

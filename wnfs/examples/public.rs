@@ -3,12 +3,13 @@
 
 use anyhow::Result;
 use chrono::Utc;
-use wnfs::{common::MemoryBlockStore, public::PublicDirectory};
+use wnfs::public::PublicDirectory;
+use wnfs_common::blockstore::InMemoryBlockstore;
 
 #[async_std::main]
 async fn main() -> Result<()> {
     // Create an in-memory blockstore.
-    let store = MemoryBlockStore::default();
+    let store = InMemoryBlockstore::<64>::new();
 
     // Create a new directory.
     let root_dir = &mut PublicDirectory::new_rc(Utc::now());

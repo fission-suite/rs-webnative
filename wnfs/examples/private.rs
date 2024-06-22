@@ -3,23 +3,26 @@
 
 use anyhow::Result;
 use chrono::Utc;
-use libipld_core::cid::Cid;
 use rand_chacha::ChaCha12Rng;
 use rand_core::{CryptoRngCore, SeedableRng};
 use wnfs::{
-    common::{BlockStore, MemoryBlockStore},
     nameaccumulator::AccumulatorSetup,
     private::{
         forest::{hamt::HamtForest, traits::PrivateForest},
         AccessKey, PrivateDirectory, PrivateNode,
     },
 };
-use wnfs_common::{utils::CondSend, Storable};
+use wnfs_common::{
+    blockstore::{Blockstore, InMemoryBlockstore},
+    ipld_core::cid::Cid,
+    utils::CondSend,
+    Storable,
+};
 
 #[async_std::main]
 async fn main() -> Result<()> {
     // Create an in-memory block store.
-    let store = &MemoryBlockStore::default();
+    let store = &InMemoryBlockstore::<64>::new();
 
     // Create a random number generator the private filesystem can use.
     let rng = &mut ChaCha12Rng::from_entropy();
@@ -40,7 +43,7 @@ async fn main() -> Result<()> {
 }
 
 async fn create_forest_and_add_directory(
-    store: &impl BlockStore,
+    store: &impl Blockstore,
     rng: &mut (impl CryptoRngCore + CondSend),
 ) -> Result<(Cid, AccessKey)> {
     // Do a trusted setup for WNFS' name accumulators

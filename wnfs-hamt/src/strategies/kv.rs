@@ -4,8 +4,9 @@ use proptest::{collection::vec, sample::SizeRange, strategy::Strategy};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{collections::HashMap, fmt::Debug, hash::Hash};
 use wnfs_common::{
+    blockstore::Blockstore,
     utils::{Arc, CondSync},
-    BlockStore, Storable,
+    Storable,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -31,7 +32,7 @@ where
 
 pub async fn node_from_kvs<K, V>(
     pairs: Vec<(K, V)>,
-    store: &impl BlockStore,
+    store: &impl Blockstore,
 ) -> Result<Arc<Node<K, V>>>
 where
     K: Storable + Clone + Debug + AsRef<[u8]> + CondSync,

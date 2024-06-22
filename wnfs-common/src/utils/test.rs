@@ -1,14 +1,11 @@
-use super::{Arc, CondSend, CondSync};
-use crate::{BlockStore, BlockStoreError, MemoryBlockStore, CODEC_DAG_CBOR, CODEC_RAW};
+use super::{Arc, CondSync};
+use crate::{BlockStoreError, CODEC_DAG_CBOR, CODEC_DAG_PB, CODEC_RAW};
 use anyhow::Result;
 use base64_serde::base64_serde_type;
+use blockstore::{Blockstore, InMemoryBlockstore};
 use bytes::Bytes;
-use libipld::{
-    cbor::DagCborCodec,
-    json::DagJsonCodec,
-    prelude::{Decode, Encode, References},
-    Cid, Ipld, IpldCodec,
-};
+use cid::Cid;
+use ipld_core::ipld::Ipld;
 use parking_lot::Mutex;
 use proptest::{
     strategy::{Strategy, ValueTree},
@@ -16,10 +13,7 @@ use proptest::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    io::Cursor,
-};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 //--------------------------------------------------------------------------------------------------
 // Type Definitions
@@ -33,7 +27,7 @@ type BlockHandler = Arc<dyn BytesToIpld>;
 
 #[derive(Default)]
 pub struct SnapshotBlockStore {
-    inner: MemoryBlockStore,
+    inner: InMemoryBlockstore<64>,
     block_handlers: Arc<Mutex<HashMap<Cid, BlockHandler>>>,
 }
 
@@ -58,13 +52,16 @@ pub trait Sampleable {
 
 impl SnapshotBlockStore {
     pub async fn get_block_snapshot(&self, cid: &Cid) -> Result<BlockSnapshot> {
-        let bytes = self.get_block(cid).await?;
-        self.handle_block(cid, &bytes)
+        let bytes = self
+            .get(cid)
+            .await?
+            .ok_or_else(|| BlockStoreError::CIDNotFound(*cid))?;
+        self.handle_block(cid, &Bytes::from(bytes))
     }
 
     pub fn handle_block(&self, cid: &Cid, bytes: &Bytes) -> Result<BlockSnapshot> {
         let ipld = match cid.codec() {
-            CODEC_DAG_CBOR => Ipld::decode(DagCborCodec, &mut Cursor::new(bytes))?,
+            CODEC_DAG_CBOR => serde_ipld_dagcbor::from_slice(bytes)?,
             CODEC_RAW => match self.block_handlers.lock().get(cid) {
                 Some(func) => func.convert(bytes)?,
                 None => Ipld::Bytes(bytes.to_vec()),
@@ -72,10 +69,8 @@ impl SnapshotBlockStore {
             _ => unimplemented!(),
         };
 
-        let mut json_bytes = Vec::new();
-        ipld.encode(DagJsonCodec, &mut json_bytes)?;
-
-        let value = serde_json::from_slice(&json_bytes)?;
+        let json_value = serde_ipld_dagjson::to_vec(&ipld)?;
+        let value = serde_json::from_slice(&json_value)?;
         Ok(BlockSnapshot {
             cid: cid.to_string(),
             value,
@@ -94,12 +89,14 @@ impl SnapshotBlockStore {
             }
 
             let snapshot = self.get_block_snapshot(&cid).await?;
-            let codec: IpldCodec = cid.codec().try_into()?;
-            <Ipld as References<IpldCodec>>::references(
-                codec,
-                &mut Cursor::new(&snapshot.bytes),
-                &mut frontier,
-            )?;
+            // Compute further references:
+            match cid.codec() {
+                CODEC_DAG_CBOR => serde_ipld_dagcbor::from_slice::<Ipld>(&snapshot.bytes)?
+                    .references(&mut frontier),
+                CODEC_DAG_PB => ipld_dagpb::links(&snapshot.bytes, &mut frontier)?,
+                CODEC_RAW => {}
+                other => unimplemented!("unimplemented codec: {other}"),
+            };
             snapshots.push(snapshot);
         }
 
@@ -111,33 +108,20 @@ impl SnapshotBlockStore {
     }
 }
 
-impl BlockStore for SnapshotBlockStore {
-    #[inline]
-    async fn get_block(&self, cid: &Cid) -> Result<Bytes, BlockStoreError> {
-        self.inner.get_block(cid).await
-    }
-
-    #[inline]
-    async fn put_block(
+impl Blockstore for SnapshotBlockStore {
+    async fn get<const S: usize>(
         &self,
-        bytes: impl Into<Bytes> + CondSend,
-        codec: u64,
-    ) -> Result<Cid, BlockStoreError> {
-        self.inner.put_block(bytes, codec).await
+        cid: &cid::CidGeneric<S>,
+    ) -> blockstore::Result<Option<Vec<u8>>> {
+        self.inner.get(cid).await
     }
 
-    #[inline]
-    async fn put_block_keyed(
+    async fn put_keyed<const S: usize>(
         &self,
-        cid: Cid,
-        bytes: impl Into<Bytes> + CondSend,
-    ) -> Result<(), BlockStoreError> {
-        self.inner.put_block_keyed(cid, bytes).await
-    }
-
-    #[inline]
-    async fn has_block(&self, cid: &Cid) -> Result<bool, BlockStoreError> {
-        self.inner.has_block(cid).await
+        cid: &cid::CidGeneric<S>,
+        data: &[u8],
+    ) -> blockstore::Result<()> {
+        self.inner.put_keyed(cid, data).await
     }
 }
 

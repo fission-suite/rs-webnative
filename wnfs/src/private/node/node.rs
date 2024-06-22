@@ -11,7 +11,6 @@ use anyhow::{bail, Result};
 use async_once_cell::OnceCell;
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
-use libipld_core::cid::Cid;
 use rand_core::CryptoRngCore;
 use skip_ratchet::{JumpSize, RatchetSeeker};
 use std::{
@@ -20,8 +19,10 @@ use std::{
     fmt::Debug,
 };
 use wnfs_common::{
+    blockstore::Blockstore,
+    ipld_core::cid::Cid,
     utils::{Arc, CondSend},
-    BlockStore,
+    BlockStoreError,
 };
 use wnfs_nameaccumulator::Name;
 
@@ -114,7 +115,7 @@ impl PrivateNode {
         &mut self,
         parent_name: &Name,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<()> {
         match self {
@@ -368,7 +369,7 @@ impl PrivateNode {
     pub async fn search_latest(
         &self,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<PrivateNode> {
         self.search_latest_nodes(forest, store)
             .await?
@@ -385,7 +386,7 @@ impl PrivateNode {
     pub async fn reconcile_latest(
         &mut self,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<()> {
         self.store(forest, store, rng).await?;
@@ -399,7 +400,7 @@ impl PrivateNode {
     pub async fn search_latest_reconciled(
         &self,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<PrivateNode> {
         let mut header = self.get_header().clone();
         let mut unmerged_heads = header.seek_unmerged_heads(forest, store).await?;
@@ -425,7 +426,7 @@ impl PrivateNode {
         (cid, node): (Cid, PrivateNode),
         nodes: BTreeMap<Cid, PrivateNode>,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<PrivateNode> {
         match node {
             PrivateNode::File(mut file) => {
@@ -468,7 +469,7 @@ impl PrivateNode {
     pub async fn search_latest_nodes(
         &self,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
     ) -> Result<Vec<PrivateNode>> {
         let header = self.get_header();
 
@@ -517,7 +518,7 @@ impl PrivateNode {
     pub(crate) async fn from_private_ref(
         private_ref: &PrivateRef,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         parent_name: Option<Name>,
     ) -> Result<PrivateNode> {
         let cid = match forest
@@ -535,10 +536,13 @@ impl PrivateNode {
         cid: Cid,
         temporal_key: &TemporalKey,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         parent_name: Option<Name>,
     ) -> Result<PrivateNode> {
-        let encrypted_bytes = store.get_block(&cid).await?;
+        let encrypted_bytes = store
+            .get(&cid)
+            .await?
+            .ok_or_else(|| BlockStoreError::CIDNotFound(cid))?;
         let snapshot_key = temporal_key.derive_snapshot_key();
         let bytes = snapshot_key.decrypt(&encrypted_bytes)?;
         let node: PrivateNodeContentSerializable = serde_ipld_dagcbor::from_slice(&bytes)?;
@@ -580,7 +584,7 @@ impl PrivateNode {
     pub(crate) async fn store_and_get_private_ref(
         &self,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<PrivateRef> {
         match self {
@@ -618,7 +622,7 @@ impl PrivateNode {
     ///
     /// #[async_std::main]
     /// async fn main() {
-    ///     let store = &MemoryBlockStore::new();
+    ///     let store = &InMemoryBlockstore::<64>::new();
     ///     let rng = &mut ChaCha12Rng::from_entropy();
     ///     let forest = &mut HamtForest::new_rsa_2048_rc(rng);
     ///     let dir = PrivateDirectory::new_rc(&forest.empty_name(), Utc::now(), rng);
@@ -636,7 +640,7 @@ impl PrivateNode {
     pub async fn load(
         access_key: &AccessKey,
         forest: &impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         parent_name: Option<Name>,
     ) -> Result<PrivateNode> {
         let private_ref = access_key.derive_private_ref()?;
@@ -647,7 +651,7 @@ impl PrivateNode {
     pub async fn store(
         &self,
         forest: &mut impl PrivateForest,
-        store: &impl BlockStore,
+        store: &impl Blockstore,
         rng: &mut (impl CryptoRngCore + CondSend),
     ) -> Result<AccessKey> {
         let private_ref = &self.store_and_get_private_ref(forest, store, rng).await?;
@@ -686,14 +690,14 @@ mod tests {
     use crate::private::forest::hamt::HamtForest;
     use rand_chacha::ChaCha12Rng;
     use rand_core::SeedableRng;
-    use wnfs_common::MemoryBlockStore;
+    use wnfs_common::blockstore::InMemoryBlockstore;
 
     #[async_std::test]
     async fn serialized_private_node_can_be_deserialized() {
         let rng = &mut ChaCha12Rng::seed_from_u64(0);
         let content = b"Lorem ipsum dolor sit amet";
         let forest = &mut HamtForest::new_rsa_2048_rc(rng);
-        let store = &MemoryBlockStore::new();
+        let store = &InMemoryBlockstore::<64>::new();
         let file = PrivateFile::with_content(
             &forest.empty_name(),
             Utc::now(),
